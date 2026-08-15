@@ -232,7 +232,7 @@ async function main(){
       sourceStatus[coin]={ok:Object.keys(errors).length===0,errors};
     }
 
-    if(!raw.BTC.upbit||!raw.BTC.klines)throw new Error("BTC 핵심 기준데이터(Upbit/Binance Klines) 실패");
+   if(!raw.BTC.upbit||!raw.BTC.klines) throw new Error(`BTC core data failed | upbit=${JSON.stringify(raw.BTC.errors?.upbit||"OK")} | klines=${JSON.stringify(raw.BTC.errors?.klines||"OK")}`); 
 
     const prev15Any=nearestAny(history,t-15*60*1000,9*60*1000);
     const prev1hAny=nearestAny(history,t-60*60*1000,22*60*1000);
