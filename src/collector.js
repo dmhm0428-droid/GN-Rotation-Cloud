@@ -31,7 +31,7 @@ async function fetchJson(url, opts={}){
       ...opts, signal:ac.signal,
       headers:{"User-Agent":"GN-Rotation-Cloud-v4","accept":"application/json",...(opts.headers||{})}
     });
-    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    if(!r.ok) throw new Error(`${r.status} ${ur1}`);
     return await r.json();
   } finally { clearTimeout(timer); }
 }
