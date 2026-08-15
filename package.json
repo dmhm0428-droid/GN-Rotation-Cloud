@@ -1,0 +1,17 @@
+{
+  "name": "gn-rotation-cloud-v4-clean",
+  "version": "4.0.0",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "collector": "node src/collector.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "express": "^5.1.0"
+  }
+}

@@ -1,0 +1,33 @@
+
+services:
+  - type: web
+    name: gn-rotation-dashboard
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: DASHBOARD_USER
+        value: gn
+      - key: DASHBOARD_PASSWORD
+        generateValue: true
+
+  - type: cron
+    name: gn-rotation-collector
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm ci
+    startCommand: npm run collector
+    schedule: "*/15 * * * *"
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
