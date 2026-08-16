@@ -58,7 +58,7 @@ async function upbitTicker(market){
   return {price:+x.trade_price,chg24:+(x.signed_change_rate||0),vol24krw:+(x.acc_trade_price_24h||0)};
 }
 async function binanceKlines(symbol){
-  const j=await retry(()=>fetchJson(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=26`));
+  const j=await retry(()=>fetchJson(`https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=1h&limit=26`));
   const c=j.map(x=>+x[4]), p=c.at(-1);
   return {price:p,r1:pct(p,c.at(-2)),r4:pct(p,c.at(-5)),r24:pct(p,c.at(-25))};
 }
