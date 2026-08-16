@@ -101,12 +101,41 @@ async function coinbaseTicker(product){
   return {price:+j.price};
 }
 async function futuresData(symbol){
+  const [oi,prem]=await Promise.all([
+    retry(()=>fetchJson(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`)),
+    retry(()=>fetchJson(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`))
+  ]);
+  return {oi:+oi.openInterest,funding:+(prem.lastFundingRate||0)};
+}
  
   
-async function globalCrypto(){
-  const j=await retry(()=>fetchJson("https://api.coingecko.com/api/v3/global"));
-  const d=+j.data.market_cap_percentage.btc;
-  if(!Number.isFinite(d)||d<10||d>90) throw new Error(`BTC dominance abnormal: ${d}`);
+
+  async function globalCrypto(){
+  try{
+    const j=await retry(()=>fetchJson("https://api.coingecko.com/api/v3/global"),1);
+    const d=+j.data.market_cap_percentage.btc;
+    if(!Number.isFinite(d)||d<10||d>90) throw new Error(`BTC dominance abnormal: ${d}`);
+    return {btcDom:d};
+  }catch(e){
+    console.warn("CoinGecko unavailable:", e.message);
+
+    const {data}=await db.from("gn_snapshots")
+      .select("btc_dominance")
+      .not("btc_dominance","is",null)
+      .order("ts",{ascending:false})
+      .limit(1)
+      .maybeSingle();
+
+    const last=+(data?.btc_dominance);
+    if(Number.isFinite(last)&&last>=10&&last<=90){
+      console.warn("Using last BTC dominance:",last);
+      return {btcDom:last};
+    }
+
+    console.warn("Using neutral BTC dominance fallback: 50");
+    return {btcDom:50};
+  }
+}
  const d=+j.data.market_cap_percentage.btc;
     if(!Number.isFinite(d)||d<10||d>90) throw new Error(`BTC dominance abnormal: ${d}`);
     return {btcDom:d};
