@@ -1,6 +1,7 @@
 
 const { createClient } = require("@supabase/supabase-js");
 const crypto = require("crypto");
+const {collectLiveMarket} = require("./market");
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -31,7 +32,7 @@ async function fetchJson(url, opts={}){
       ...opts, signal:ac.signal,
       headers:{"User-Agent":"GN-Rotation-Cloud-v4","accept":"application/json",...(opts.headers||{})}
     });
-    if(!r.ok) throw new Error(`${r.status} ${url}`);
+    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     return await r.json();
   } finally { clearTimeout(timer); }
 }
@@ -71,7 +72,7 @@ async function binanceCvd15m(symbol){
   const MAX_PAGES=40;
   while(cursor<=end && pages<MAX_PAGES){
     const j=await retry(()=>fetchJson(
-      `https://api.binance.com/api/v3/aggTrades?symbol=${symbol}&startTime=${cursor}&endTime=${end}&limit=1000`
+      `https://data-api.binance.vision/api/v3/aggTrades?symbol=${symbol}&startTime=${cursor}&endTime=${end}&limit=1000`
     ),1);
     pages++;
     if(!Array.isArray(j) || j.length===0) break;
@@ -107,10 +108,7 @@ async function futuresData(symbol){
   ]);
   return {oi:+oi.openInterest,funding:+(prem.lastFundingRate||0)};
 }
- 
-  
-
-  async function globalCrypto(){
+async function globalCrypto(){
   try{
     const j=await retry(()=>fetchJson("https://api.coingecko.com/api/v3/global"),1);
     const d=+j.data.market_cap_percentage.btc;
@@ -136,29 +134,10 @@ async function futuresData(symbol){
     return {btcDom:50};
   }
 }
- const d=+j.data.market_cap_percentage.btc;
-    if(!Number.isFinite(d)||d<10||d>90) throw new Error(`BTC dominance abnormal: ${d}`);
-    return {btcDom:d};
-  }catch(e){
-    console.warn("CoinGecko unavailable:", e.message);
-
-    const {data}=await db.from("gn_snapshots")
-      .select("btc_dominance")
-      .not("btc_dominance","is",null)
-      .order("ts",{ascending:false})
-      .limit(1)
-      .maybeSingle();
-
-    const last=+(data?.btc_dominance);
-    if(Number.isFinite(last)&&last>=10&&last<=90){
-      console.warn("Using last BTC dominance:",last);
-      return {btcDom:last};
-    }
-
-    console.warn("Using neutral BTC dominance fallback: 50");
-    return {btcDom:50};
-  }
-}
+function parseFred(csv){
+  return csv.trim().split(/\r?\n/).slice(1).map(line=>{
+    const [d,v]=line.split(","); return {d,v:+v};
+  }).filter(x=>Number.isFinite(x.v));
 }
 async function fred(id){
   const t=await retry(()=>fetchText(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}`));
@@ -274,7 +253,7 @@ async function main(){
       sourceStatus[coin]={ok:Object.keys(errors).length===0,errors};
     }
 
-   if(!raw.BTC.upbit||!raw.BTC.klines) throw new Error(`BTC core data failed | upbit=${JSON.stringify(raw.BTC.errors?.upbit||"OK")} | klines=${JSON.stringify(raw.BTC.errors?.klines||"OK")}`); 
+    if(!raw.BTC.upbit||!raw.BTC.klines)throw new Error("BTC 핵심 기준데이터(Upbit/Binance Klines) 실패");
 
     const prev15Any=nearestAny(history,t-15*60*1000,9*60*1000);
     const prev1hAny=nearestAny(history,t-60*60*1000,22*60*1000);
@@ -347,6 +326,26 @@ async function main(){
         const msg=`${r.coin} ${r.stage} | 점수 ${r.score.toFixed(2)} | ΔScore15 ${r.deltaScore15?.toFixed(2)??"N/A"} | 품질 ${(r.quality*100).toFixed(0)}%`;
         await db.from("gn_alerts").insert({coin:r.coin,level:r.stage,score:r.score,stage:r.stage,message:msg,snapshot_id:data.id});
       }
+    }
+
+    // Market-wide snapshot: breadth + futures funding breadth + BTC/ETH taker flow.
+    // Stored separately so the dashboard can judge the whole market, not only 4 tracked coins.
+    try{
+      const btc=results.find(x=>x.coin==="BTC")||null;
+      const market=await collectLiveMarket({btc,macroScore:mScore});
+      const {error:marketErr}=await db.from("gn_market_snapshots").insert({
+        run_id:runId,ts:market.ts,market_score:market.decision.score,action:market.decision.action,
+        regime:market.decision.regime,quality:market.quality,spot_breadth100:market.spot?.breadth100??null,
+        spot_breadth50:market.spot?.breadth50??null,spot_median100:market.spot?.median100??null,
+        spot_vw100:market.spot?.volumeWeighted100??null,funding_positive:market.funding?.positive??null,
+        funding_median:market.funding?.median??null,funding_hot:market.funding?.hot??null,
+        btc_taker_ratio:market.btcTaker?.avg15m??null,eth_taker_ratio:market.ethTaker?.avg15m??null,
+        leaders:market.spot?.leaders??[],laggards:market.spot?.laggards??[],reasons:market.decision.reasons,
+        components:market.decision.components,source_errors:market.errors
+      });
+      if(marketErr)throw marketErr;
+    }catch(marketErr){
+      sourceStatus.market={ok:false,errors:{market:String(marketErr.message||marketErr)}};
     }
 
     await db.from("gn_runs").update({
