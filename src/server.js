@@ -1,6 +1,7 @@
 const express=require("express");
 const {createClient}=require("@supabase/supabase-js");
 const {collectLiveMarket}=require("./market");
+const {createDeepSeekTestHandler}=require("./ai/deepseek-admin");
 const app=express();
 
 const URL=process.env.SUPABASE_URL, KEY=process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -30,6 +31,7 @@ app.get("/api/market/latest",async(req,res)=>{
   const {data,error}=await db.from("gn_market_snapshots").select("*").order("ts",{ascending:false}).limit(1).maybeSingle();
   if(error)return res.status(500).json({error:error.message}); res.json(data||null);
 });
+app.post("/api/admin/ai-test/deepseek",createDeepSeekTestHandler({db,env:process.env}));
 let liveCache={at:0,data:null};
 app.get("/api/market/live",async(req,res)=>{
   try{
