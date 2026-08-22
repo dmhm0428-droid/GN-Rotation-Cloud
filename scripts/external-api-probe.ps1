@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$Providers = "Perplexity,xAI,DeepSeek"
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -33,6 +35,7 @@ function Protect-Text {
     }
 
     $safe = $Text -replace '(?i)Bearer\s+[A-Za-z0-9._~+/-]+', 'Bearer [REDACTED]'
+    $safe = $safe -replace '(?i)(api\s*key\s*:\s*)\S+', '$1[REDACTED]'
     foreach ($secret in $secrets) {
         if (-not [string]::IsNullOrEmpty($secret)) {
             $safe = $safe.Replace($secret, "[REDACTED]")
@@ -176,19 +179,30 @@ function Invoke-SingleApiProbe {
 
 Add-Type -AssemblyName System.Net.Http
 
-$results = @(
-    Invoke-SingleApiProbe `
+$selectedProviders = @($Providers.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$knownProviders = @("Perplexity", "xAI", "DeepSeek")
+$unknownProviders = @($selectedProviders | Where-Object { $_ -notin $knownProviders })
+if ($unknownProviders.Count -gt 0) {
+    throw "Unknown providers: $($unknownProviders -join ', '). No API requests were sent."
+}
+
+$results = @()
+
+if ($selectedProviders -contains "Perplexity") {
+    $results += Invoke-SingleApiProbe `
         -Provider "Perplexity" `
         -Uri "https://api.perplexity.ai/v1/sonar" `
         -ApiKey ([Environment]::GetEnvironmentVariable("PERPLEXITY_API_KEY")) `
         -Payload @{
             model      = "sonar"
             messages   = @(@{ role = "user"; content = "Reply OK." })
-            max_tokens = 1
+            max_tokens = 16
             stream     = $false
         }
+}
 
-    Invoke-SingleApiProbe `
+if ($selectedProviders -contains "xAI") {
+    $results += Invoke-SingleApiProbe `
         -Provider "xAI" `
         -Uri "https://api.x.ai/v1/chat/completions" `
         -ApiKey ([Environment]::GetEnvironmentVariable("XAI_API_KEY")) `
@@ -199,8 +213,10 @@ $results = @(
             reasoning_effort = "none"
             stream           = $false
         }
+}
 
-    Invoke-SingleApiProbe `
+if ($selectedProviders -contains "DeepSeek") {
+    $results += Invoke-SingleApiProbe `
         -Provider "DeepSeek" `
         -Uri "https://api.deepseek.com/chat/completions" `
         -ApiKey ([Environment]::GetEnvironmentVariable("DEEPSEEK_API_KEY")) `
@@ -211,7 +227,7 @@ $results = @(
             thinking   = @{ type = "disabled" }
             stream     = $false
         }
-)
+}
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $outputDirectory = Join-Path $projectRoot "work"
@@ -232,5 +248,4 @@ $json = $output | ConvertTo-Json -Depth 12
 )
 
 Write-Host "Probe complete. Sanitized result: $outputPath"
-
 
