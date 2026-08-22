@@ -8,10 +8,12 @@
   },
   "scripts": {
     "collector": "node src/collector.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "express": "^5.1.0"
   }
 }
+
