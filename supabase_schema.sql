@@ -50,6 +50,32 @@ create index if not exists gn_snapshots_coin_ts_idx on public.gn_snapshots (coin
 create index if not exists gn_snapshots_ts_idx on public.gn_snapshots (ts desc);
 create index if not exists gn_runs_started_idx on public.gn_runs (started_at desc);
 
+create table if not exists public.gn_market_snapshots (
+  id bigserial primary key,
+  run_id uuid not null references public.gn_runs(id) on delete cascade,
+  ts timestamptz not null default now(),
+  market_score numeric not null,
+  action text not null,
+  regime text not null,
+  quality numeric not null default 0,
+  spot_breadth100 numeric,
+  spot_breadth50 numeric,
+  spot_median100 numeric,
+  spot_vw100 numeric,
+  funding_positive numeric,
+  funding_median numeric,
+  funding_hot numeric,
+  btc_taker_ratio numeric,
+  eth_taker_ratio numeric,
+  leaders jsonb not null default '[]'::jsonb,
+  laggards jsonb not null default '[]'::jsonb,
+  reasons jsonb not null default '[]'::jsonb,
+  components jsonb not null default '{}'::jsonb,
+  source_errors jsonb not null default '{}'::jsonb
+);
+
+create index if not exists gn_market_snapshots_ts_idx on public.gn_market_snapshots (ts desc);
+
 create table if not exists public.gn_overlays (
   id integer primary key check (id=1),
   etf jsonb not null default '{"BTC":5,"ETH":5,"SOL":5,"LINK":5}'::jsonb,
@@ -77,16 +103,20 @@ create index if not exists gn_alerts_ts_idx on public.gn_alerts (ts desc);
 -- 브라우저에서 DB를 직접 공개하지 않는다.
 alter table public.gn_runs enable row level security;
 alter table public.gn_snapshots enable row level security;
+alter table public.gn_market_snapshots enable row level security;
 alter table public.gn_overlays enable row level security;
 alter table public.gn_alerts enable row level security;
 
 revoke all on public.gn_runs from anon, authenticated;
 revoke all on public.gn_snapshots from anon, authenticated;
+revoke all on public.gn_market_snapshots from anon, authenticated;
 revoke all on public.gn_overlays from anon, authenticated;
 revoke all on public.gn_alerts from anon, authenticated;
 
 grant all on public.gn_runs to service_role;
 grant all on public.gn_snapshots to service_role;
+grant all on public.gn_market_snapshots to service_role;
 grant all on public.gn_overlays to service_role;
 grant all on public.gn_alerts to service_role;
 grant usage, select on all sequences in schema public to service_role;
+
