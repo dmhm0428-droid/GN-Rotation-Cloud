@@ -1,5 +1,29 @@
 "use strict";
 
+const TOP3_MIN_SCORE=58;
+const TOP3_MAX_RETURN_5M=.035;
+const TOP3_MAX_RETURN_15M=.06;
+const TOP3_STATUSES=new Set(["SCOUT","ENTRY"]);
+
+function isLatePump(details){
+  const late=details?.late_pump;
+  if(!late)return false;
+  return late.latePumpRisk===true||late.risk===true||late.blocked===true||late.no_chase===true;
+}
+
+function isDisplayableTopCandidate(row){
+  if(!row||Number(row.rank)>=100)return false;
+  if(!TOP3_STATUSES.has(String(row.status||"").toUpperCase()))return false;
+  const score=Number(row.score),r5=Number(row.return5m),r15=Number(row.return15m);
+  if(!Number.isFinite(score)||score<TOP3_MIN_SCORE)return false;
+  if(!Number.isFinite(r5)||r5<=0||r5>TOP3_MAX_RETURN_5M)return false;
+  if(!Number.isFinite(r15)||r15<=0||r15>TOP3_MAX_RETURN_15M)return false;
+  if(row.details?.market_block)return false;
+  if(row.details?.market_context?.warOverride===true)return false;
+  if(isLatePump(row.details))return false;
+  return true;
+}
+
 function formatCandidate(row){
   const holding=Number(row.rank)>=100||["HOLD","REDUCE","EXIT"].includes(row.status);
   const context=row.details?.market_context||null;
@@ -50,10 +74,16 @@ async function loadLatestPrePump(db){
     .limit(13);
   if(rows.error)throw rows.error;
 
-  // rank 1~3 = 신규 후보. rank 100+ = 최근 ENTRY 이후 보유 추적.
-  // V5는 시장 게이트, 정책/AI 컨텍스트, Shannon-Thorp 참고 비중을 details에 함께 저장한다.
-  // TOP3 이탈 자체는 매도/교체 신호로 취급하지 않는다.
-  return (rows.data||[]).map(formatCandidate);
+  const source=rows.data||[];
+  const top=source
+    .filter(isDisplayableTopCandidate)
+    .sort((a,b)=>Number(b.score)-Number(a.score)||Number(a.rank)-Number(b.rank))
+    .slice(0,3)
+    .map((row,index)=>formatCandidate({...row,rank:index+1}));
+
+  // 보유 추적은 TOP3 선발과 분리한다. TOP3가 비면 억지로 3개를 채우지 않는다.
+  const holdings=source.filter(row=>Number(row.rank)>=100||["HOLD","REDUCE","EXIT"].includes(row.status)).map(formatCandidate);
+  return [...top,...holdings];
 }
 
 function createLatestPrePumpHandler({db,load=loadLatestPrePump}){
@@ -63,4 +93,4 @@ function createLatestPrePumpHandler({db,load=loadLatestPrePump}){
   };
 }
 
-module.exports={createLatestPrePumpHandler,formatCandidate,loadLatestPrePump};
+module.exports={createLatestPrePumpHandler,formatCandidate,isDisplayableTopCandidate,loadLatestPrePump};
