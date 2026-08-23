@@ -1,6 +1,7 @@
 "use strict";
 
 const {spawn}=require("node:child_process");
+const path=require("node:path");
 
 const PROVIDERS=["PERPLEXITY","XAI","DEEPSEEK","ANTHROPIC","GEMINI"];
 let aiRunning=false;
@@ -32,7 +33,9 @@ function runAi(){
   });
 }
 
-const server=spawn(process.execPath,["src/server.js"],{env:process.env,stdio:"inherit"});
+const etfPreload=path.resolve(__dirname,"etf-dashboard-patch.js");
+const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,`--require=${etfPreload}`].filter(Boolean).join(" ")};
+const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
 
 setTimeout(runAi,5000);
