@@ -3,6 +3,7 @@
 const TOP3_MIN_SCORE=58;
 const TOP3_MAX_RETURN_5M=.035;
 const TOP3_MAX_RETURN_15M=.06;
+const TOP3_MIN_DAILY_IGNITION=45;
 const TOP3_STATUSES=new Set(["SCOUT","ENTRY"]);
 
 function isLatePump(details){
@@ -18,6 +19,8 @@ function isDisplayableTopCandidate(row){
   if(!Number.isFinite(score)||score<TOP3_MIN_SCORE)return false;
   if(!Number.isFinite(r5)||r5<=0||r5>TOP3_MAX_RETURN_5M)return false;
   if(!Number.isFinite(r15)||r15<=0||r15>TOP3_MAX_RETURN_15M)return false;
+  const daily=row.details?.daily_ignition;
+  if(daily?.available===true&&Number(daily.score)<TOP3_MIN_DAILY_IGNITION)return false;
   if(row.details?.market_block)return false;
   if(row.details?.market_context?.warOverride===true)return false;
   if(isLatePump(row.details))return false;
@@ -28,6 +31,7 @@ function formatCandidate(row){
   const holding=Number(row.rank)>=100||["HOLD","REDUCE","EXIT"].includes(row.status);
   const context=row.details?.market_context||null;
   const sizing=row.details?.shannon_thorp||null;
+  const daily=row.details?.daily_ignition||null;
   return {
     rank:holding?"보유":row.rank,
     market:row.market,
@@ -39,6 +43,19 @@ function formatCandidate(row){
     volumeRatio15m:row.volume_ratio15m,
     reason:row.details?.holding_reason||row.details?.confirmation?.reason||row.details?.market_block||null,
     latePump:row.details?.late_pump||null,
+    dailyIgnition:daily?{
+      score:daily.score,
+      stage:daily.stage,
+      available:daily.available,
+      reasons:daily.reasons||[],
+      turnoverRatio:daily.turnover_ratio,
+      resistanceDistance:daily.resistance_distance,
+      rsi:daily.rsi,
+      higherLow:daily.higher_low,
+      compression:daily.compression,
+      obvDirection:daily.obv_direction,
+      intradayScore:daily.intraday_score
+    }:null,
     marketContext:context?{
       marketScore:context.marketScore,
       gateScore:context.gateScore,
