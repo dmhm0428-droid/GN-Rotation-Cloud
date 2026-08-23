@@ -52,7 +52,7 @@ function buildPayload(provider,input){
       }
     };
   }
-  if(provider.name==="deepseek")payload.thinking={type:"disabled"};
+  if(provider.name==="deepseek")payload.response_format={type:"json_object"};
   return payload;
 }
 function responseText(provider,body){
@@ -124,6 +124,9 @@ async function invokeProvider(provider,input,transport=fetchTransport){
   }
   if(provider.name==="perplexity"){
     try{return await run(provider);}catch(error){if(error?.code!=="INVALID_RESPONSE")throw error;await sleep(500);return run({...provider,maxOutputTokens:Math.max(provider.maxOutputTokens,1024)});}
+  }
+  if(provider.name==="deepseek"){
+    try{return await run(provider);}catch(error){if(error?.code!=="INVALID_RESPONSE")throw error;await sleep(500);return run({...provider,maxOutputTokens:Math.max(provider.maxOutputTokens,768)});}
   }
   return run(provider);
 }
