@@ -16,6 +16,7 @@ function number(value, fallback, min, max){
   const n=Number(value);
   return Number.isFinite(n)?Math.max(min,Math.min(max,n)):fallback;
 }
+function clean(value){return String(value??"").trim();}
 function loadAiConfig(env=process.env){
   const enabled=bool(env.AI_ANALYSIS_ENABLED,false);
   const providers={};
@@ -25,9 +26,9 @@ function loadAiConfig(env=process.env){
       name,
       kind:base.kind,
       enabled:enabled&&bool(env[`${p}_ENABLED`],false),
-      apiKey:env[`${p}_API_KEY`]||"",
-      endpoint:env[`${p}_ENDPOINT`]||base.endpoint,
-      model:env[`${p}_MODEL`]||base.model,
+      apiKey:clean(env[`${p}_API_KEY`]),
+      endpoint:clean(env[`${p}_ENDPOINT`])||base.endpoint,
+      model:clean(env[`${p}_MODEL`])||base.model,
       timeoutMs:number(env[`${p}_TIMEOUT_MS`],15000,1000,60000),
       maxOutputTokens:number(env[`${p}_MAX_OUTPUT_TOKENS`],256,1,2048),
       maxCostUsd:number(env[`${p}_MAX_COST_USD`],0.02,0,1),
