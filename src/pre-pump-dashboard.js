@@ -1,14 +1,17 @@
 "use strict";
 
 function formatCandidate(row){
+  const holding=Number(row.rank)>=100||["HOLD","REDUCE","EXIT"].includes(row.status);
   return {
-    rank:row.rank,
+    rank:holding?"보유":row.rank,
     market:row.market,
     score:row.score,
     status:row.status,
+    holding,
     return5m:row.return5m,
     return15m:row.return15m,
     volumeRatio15m:row.volume_ratio15m,
+    reason:row.details?.holding_reason||null,
     updated_at:row.ts
   };
 }
@@ -23,11 +26,14 @@ async function loadLatestPrePump(db){
   if(!latest.data)return [];
 
   const rows=await db.from("gn_pre_pump_snapshots")
-    .select("rank,market,score,status,return5m,return15m,volume_ratio15m,ts")
+    .select("rank,market,score,status,return5m,return15m,volume_ratio15m,details,ts")
     .eq("run_id",latest.data.run_id)
     .order("rank",{ascending:true})
-    .limit(3);
+    .limit(13);
   if(rows.error)throw rows.error;
+
+  // rank 1~3 = 신규 진입 후보. rank 100+ = 최근 ENTRY 이후 보유 추적.
+  // TOP3 이탈 자체는 매도/교체 신호로 취급하지 않는다.
   return (rows.data||[]).map(formatCandidate);
 }
 
