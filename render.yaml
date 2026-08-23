@@ -17,6 +17,30 @@ services:
         value: gn
       - key: DASHBOARD_PASSWORD
         generateValue: true
+      - key: AI_ANALYSIS_ENABLED
+        value: "true"
+      - key: AI_MAX_COST_USD_PER_RUN
+        value: "0.05"
+      - key: PERPLEXITY_ENABLED
+        value: "true"
+      - key: PERPLEXITY_API_KEY
+        sync: false
+      - key: XAI_ENABLED
+        value: "true"
+      - key: XAI_API_KEY
+        sync: false
+      - key: DEEPSEEK_ENABLED
+        value: "true"
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: ANTHROPIC_ENABLED
+        value: "true"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_ENABLED
+        value: "true"
+      - key: GEMINI_API_KEY
+        sync: false
 
   - type: cron
     name: gn-multi-ai-analysis
