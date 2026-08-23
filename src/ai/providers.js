@@ -12,12 +12,13 @@ function buildPayload(provider,input){
       model:provider.model,
       max_tokens:provider.maxOutputTokens,
       system:systemPrompt(),
-      messages:[{role:"user",content:JSON.stringify(input)}]
+      messages:[{role:"user",content:[{type:"text",text:JSON.stringify(input)}]}]
     };
   }
   if(provider.kind==="gemini"){
     return {
-      contents:[{role:"user",parts:[{text:`${systemPrompt()}\n\nGN snapshot:\n${JSON.stringify(input)}`}]}],
+      systemInstruction:{parts:[{text:systemPrompt()}]},
+      contents:[{role:"user",parts:[{text:JSON.stringify(input)}]}],
       generationConfig:{maxOutputTokens:provider.maxOutputTokens,responseMimeType:"application/json"}
     };
   }
@@ -37,6 +38,11 @@ function normalizeAnalysis(text){
   const confidence=Math.max(0,Math.min(1,Number(value.confidence)||0));
   return {summary:String(value.summary||"").slice(0,1000),sentiment,confidence,signals:Array.isArray(value.signals)?value.signals.slice(0,10).map(x=>String(x).slice(0,300)):[]};
 }
+function providerErrorCode(provider,status,body){
+  const raw=body?.error?.type||body?.error?.status||body?.type||"";
+  const safe=String(raw).toUpperCase().replace(/[^A-Z0-9_]+/g,"_").slice(0,48);
+  return safe?`${provider.name.toUpperCase()}_${safe}`:`HTTP_${status}`;
+}
 async function fetchTransport({provider,endpoint,apiKey,payload,timeoutMs}){
   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
@@ -45,13 +51,14 @@ async function fetchTransport({provider,endpoint,apiKey,payload,timeoutMs}){
     if(provider.kind==="anthropic"){
       headers={...headers,"x-api-key":apiKey,"anthropic-version":"2023-06-01"};
     }else if(provider.kind==="gemini"){
-      url=`${endpoint}/models/${encodeURIComponent(provider.model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      url=`${endpoint}/models/${encodeURIComponent(provider.model)}:generateContent`;
+      headers={...headers,"x-goog-api-key":apiKey};
     }else{
       headers={...headers,"Authorization":`Bearer ${apiKey}`};
     }
     const response=await fetch(url,{method:"POST",signal:controller.signal,headers,body:JSON.stringify(payload)});
     const body=await response.json().catch(()=>null);
-    if(!response.ok)throw new AiProviderError(`HTTP_${response.status}`,`Provider returned HTTP ${response.status}`);
+    if(!response.ok)throw new AiProviderError(providerErrorCode(provider,response.status,body),`Provider returned HTTP ${response.status}`);
     return {body,usage:body?.usage||body?.usageMetadata||{}};
   }catch(error){if(error?.name==="AbortError")throw new AiProviderError("TIMEOUT","Provider request timed out");throw error;}
   finally{clearTimeout(timer);}
@@ -65,7 +72,7 @@ async function invokeProvider(provider,input,transport=fetchTransport){
   return {provider:provider.name,model:provider.model,status:"success",...normalizeAnalysis(responseText(provider,result.body)),usage:sanitizeUsage(result.usage),costUsd:provider.estimatedCostUsd};
 }
 function sanitizeUsage(usage){
-  const aliases={prompt_tokens:["prompt_tokens","promptTokenCount","input_tokens"],completion_tokens:["completion_tokens","candidatesTokenCount","output_tokens"],total_tokens:["total_tokens","totalTokenCount"]};
+  const aliases={prompt_tokens:["prompt_tokens","promptTokenCount","input_tokens","inputTokens"],completion_tokens:["completion_tokens","candidatesTokenCount","output_tokens","outputTokens"],total_tokens:["total_tokens","totalTokenCount"]};
   const out={};
   for(const [key,names] of Object.entries(aliases)){
     const found=names.map(n=>usage?.[n]).find(v=>Number.isFinite(Number(v)));
