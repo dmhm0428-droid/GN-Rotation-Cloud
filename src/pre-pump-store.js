@@ -33,7 +33,21 @@ function snapshotRows(candidates,runId,timestamp){
     details:{
       obv:{direction:candidate.obvDirection??null},
       structure:{higher_low_15m:candidate.higherLow15m??null,resistance_proximity_15m:candidate.resistanceProximity15m??null,structure_1h:candidate.structure1h??null},
-      derivatives:{score:candidate.derivativeScore??50,data_available:candidate.derivativeDataAvailable??false}
+      derivatives:{score:candidate.derivativeScore??50,data_available:candidate.derivativeDataAvailable??false},
+      daily_ignition:{
+        score:candidate.dailyIgnitionScore??null,
+        stage:candidate.dailyIgnitionStage??null,
+        available:candidate.dailyIgnitionAvailable??false,
+        reasons:candidate.dailyIgnitionReasons||[],
+        turnover_ratio:candidate.dailyTurnoverRatio??null,
+        resistance_distance:candidate.dailyResistanceDistance??null,
+        rsi:candidate.dailyRsi??null,
+        higher_low:candidate.dailyHigherLow??null,
+        compression:candidate.dailyCompression??null,
+        obv_direction:candidate.dailyObvDirection??null,
+        intraday_score:candidate.intradayScore??null
+      },
+      late_pump:{risk:candidate.latePumpRisk??false,penalty:candidate.latePumpPenalty??0,reasons:candidate.latePumpReasons||[]}
     }
   }));
 }
