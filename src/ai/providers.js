@@ -5,15 +5,16 @@ class AiProviderError extends Error{
 }
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function systemPrompt(){
-  return "Analyze the supplied GN market snapshot as read-only context. Never recommend or create orders. Return JSON only: {summary:string,sentiment:'risk_off'|'neutral'|'risk_on',confidence:number,signals:string[]}.";
+  return "Analyze the supplied GN market snapshot as read-only context. Never recommend or create orders. Return exactly one minified JSON object and nothing else: {summary:string,sentiment:'risk_off'|'neutral'|'risk_on',confidence:number,signals:string[]}. No markdown, no code fence, no preface.";
 }
 function buildPayload(provider,input){
   if(provider.kind==="anthropic"){
     return {
       model:provider.model,
-      max_tokens:provider.maxOutputTokens,
+      max_tokens:Math.max(provider.maxOutputTokens,512),
+      temperature:0,
       system:systemPrompt(),
-      messages:[{role:"user",content:[{type:"text",text:JSON.stringify(input)}]}]
+      messages:[{role:"user",content:[{type:"text",text:`GN snapshot:\n${JSON.stringify(input)}\n\nReturn only the JSON object.`}]}]
     };
   }
   if(provider.kind==="gemini"){
@@ -32,7 +33,7 @@ function buildPayload(provider,input){
   return payload;
 }
 function responseText(provider,body){
-  if(provider.kind==="anthropic")return body?.content?.find(x=>x?.type==="text")?.text;
+  if(provider.kind==="anthropic")return body?.content?.filter(x=>x?.type==="text").map(x=>x.text||"").join("");
   if(provider.kind==="gemini")return body?.candidates?.[0]?.content?.parts?.filter(x=>!x?.thought).map(x=>x?.text||"").join("");
   return body?.choices?.[0]?.message?.content;
 }
@@ -104,6 +105,13 @@ async function invokeProvider(provider,input,transport=fetchTransport){
       }
     }
     throw lastError;
+  }
+  if(provider.kind==="anthropic"){
+    try{return await run(provider);}catch(error){
+      if(error?.code!=="INVALID_RESPONSE")throw error;
+      await sleep(800);
+      return run({...provider,maxOutputTokens:Math.max(provider.maxOutputTokens,768)});
+    }
   }
   return run(provider);
 }
