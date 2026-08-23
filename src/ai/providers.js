@@ -33,6 +33,24 @@ function buildPayload(provider,input){
   }
   const maxTokens=provider.name==="perplexity"?Math.max(provider.maxOutputTokens,768):provider.maxOutputTokens;
   const payload={model:provider.model,messages:[{role:"system",content:prompt},{role:"user",content:JSON.stringify(input)}],max_tokens:maxTokens,stream:false};
+  if(provider.name==="perplexity"){
+    payload.response_format={
+      type:"json_schema",
+      json_schema:{
+        schema:{
+          type:"object",
+          properties:{
+            summary:{type:"string"},
+            sentiment:{type:"string",enum:["risk_off","neutral","risk_on"]},
+            confidence:{type:"number",minimum:0,maximum:1},
+            signals:{type:"array",items:{type:"string"}}
+          },
+          required:["summary","sentiment","confidence","signals"],
+          additionalProperties:false
+        }
+      }
+    };
+  }
   if(provider.name==="deepseek")payload.thinking={type:"disabled"};
   return payload;
 }
@@ -71,6 +89,7 @@ async function fetchTransport({provider,endpoint,apiKey,payload,timeoutMs}){
   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
     let url=endpoint;
+    if(provider.name==="perplexity"&&/^https:\/\/api\.perplexity\.ai\/chat\/completions\/?$/i.test(url))url="https://api.perplexity.ai/v1/sonar";
     let headers={"Content-Type":"application/json","Accept":"application/json"};
     if(provider.kind==="anthropic")headers={...headers,"x-api-key":apiKey,"anthropic-version":"2023-06-01"};
     else if(provider.kind==="gemini"){url=`${endpoint}/models/${encodeURIComponent(provider.model)}:generateContent`;headers={...headers,"x-goog-api-key":apiKey};}
