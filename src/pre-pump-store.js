@@ -27,6 +27,7 @@ function snapshotRows(candidates,runId,timestamp){
     rank:index+1,
     score:candidate.score,
     status:candidate.state,
+    krw_price:candidate.krwPrice??null,
     return5m:candidate.return5m,
     return15m:candidate.return15m,
     volume_ratio15m:candidate.turnoverGrowth15m,
