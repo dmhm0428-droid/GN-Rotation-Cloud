@@ -31,7 +31,8 @@ function buildPayload(provider,input){
       }
     };
   }
-  const payload={model:provider.model,messages:[{role:"system",content:prompt},{role:"user",content:JSON.stringify(input)}],max_tokens:provider.maxOutputTokens,stream:false};
+  const maxTokens=provider.name==="perplexity"?Math.max(provider.maxOutputTokens,768):provider.maxOutputTokens;
+  const payload={model:provider.model,messages:[{role:"system",content:prompt},{role:"user",content:JSON.stringify(input)}],max_tokens:maxTokens,stream:false};
   if(provider.name==="deepseek")payload.thinking={type:"disabled"};
   return payload;
 }
@@ -100,6 +101,9 @@ async function invokeProvider(provider,input,transport=fetchTransport){
   }
   if(provider.kind==="anthropic"){
     try{return await run(provider);}catch(error){if(error?.code!=="INVALID_RESPONSE")throw error;await sleep(800);return run({...provider,maxOutputTokens:Math.max(provider.maxOutputTokens,768)});}
+  }
+  if(provider.name==="perplexity"){
+    try{return await run(provider);}catch(error){if(error?.code!=="INVALID_RESPONSE")throw error;await sleep(500);return run({...provider,maxOutputTokens:Math.max(provider.maxOutputTokens,1024)});}
   }
   return run(provider);
 }
