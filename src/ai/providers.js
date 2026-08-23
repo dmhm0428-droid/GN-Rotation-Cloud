@@ -3,6 +3,7 @@
 class AiProviderError extends Error{
   constructor(code,message){super(message);this.name="AiProviderError";this.code=code;}
 }
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function systemPrompt(){
   return "Analyze the supplied GN market snapshot as read-only context. Never recommend or create orders. Return JSON only: {summary:string,sentiment:'risk_off'|'neutral'|'risk_on',confidence:number,signals:string[]}.";
 }
@@ -19,7 +20,11 @@ function buildPayload(provider,input){
     return {
       systemInstruction:{parts:[{text:systemPrompt()}]},
       contents:[{role:"user",parts:[{text:JSON.stringify(input)}]}],
-      generationConfig:{maxOutputTokens:provider.maxOutputTokens,responseMimeType:"application/json"}
+      generationConfig:{
+        maxOutputTokens:Math.max(provider.maxOutputTokens,512),
+        responseMimeType:"application/json",
+        thinkingConfig:{thinkingLevel:"low"}
+      }
     };
   }
   const payload={model:provider.model,messages:[{role:"system",content:systemPrompt()},{role:"user",content:JSON.stringify(input)}],max_tokens:provider.maxOutputTokens,stream:false};
@@ -49,8 +54,9 @@ function providerErrorCode(provider,status,body){
     if(/model/.test(msg)&&/not found|invalid|unavailable|access/.test(msg))return "ANTHROPIC_MODEL_ACCESS";
   }
   if(provider.kind==="gemini"){
-    if(/model/.test(msg)&&/not found|unsupported|unavailable/.test(msg))return "GEMINI_MODEL_ACCESS";
+    if(/model/.test(msg)&&/not found|unsupported/.test(msg))return "GEMINI_MODEL_ACCESS";
     if(/quota|billing|resource exhausted/.test(msg))return "GEMINI_QUOTA_OR_BILLING";
+    if(status===503||/temporarily unavailable|service unavailable|unavailable/.test(msg))return "GEMINI_UNAVAILABLE";
   }
   const raw=body?.error?.type||body?.error?.status||body?.type||"";
   const safe=String(raw).toUpperCase().replace(/[^A-Z0-9_]+/g,"_").slice(0,48);
@@ -76,6 +82,9 @@ async function fetchTransport({provider,endpoint,apiKey,payload,timeoutMs}){
   }catch(error){if(error?.name==="AbortError")throw new AiProviderError("TIMEOUT","Provider request timed out");throw error;}
   finally{clearTimeout(timer);}
 }
+function transientGeminiError(error){
+  return ["GEMINI_UNAVAILABLE","HTTP_500","HTTP_502","HTTP_503","TIMEOUT"].includes(error?.code);
+}
 async function invokeProvider(provider,input,transport=fetchTransport){
   if(!provider.enabled)return {provider:provider.name,model:provider.model,status:"disabled"};
   if(!provider.apiKey)throw new AiProviderError("MISSING_KEY",`${provider.name} API key is missing`);
@@ -85,12 +94,18 @@ async function invokeProvider(provider,input,transport=fetchTransport){
     const result=await transport({provider:p,endpoint:p.endpoint,apiKey:p.apiKey,payload,timeoutMs:p.timeoutMs});
     return {provider:p.name,model:p.model,status:"success",...normalizeAnalysis(responseText(p,result.body)),usage:sanitizeUsage(result.usage),costUsd:p.estimatedCostUsd};
   };
-  try{return await run(provider);}
-  catch(error){
-    if(provider.kind==="anthropic" && /INVALID_REQUEST|HTTP_400/.test(error?.code||""))return run({...provider,model:"claude-sonnet-5"});
-    if(provider.kind==="gemini" && /NOT_FOUND|HTTP_404/.test(error?.code||""))return run({...provider,model:"gemini-3.7-flash"});
-    throw error;
+  if(provider.kind==="gemini"){
+    let lastError;
+    for(let attempt=0;attempt<4;attempt++){
+      try{return await run(provider);}catch(error){
+        lastError=error;
+        if(!transientGeminiError(error)||attempt===3)throw error;
+        await sleep([1000,3000,7000][attempt]);
+      }
+    }
+    throw lastError;
   }
+  return run(provider);
 }
 function sanitizeUsage(usage){
   const aliases={prompt_tokens:["prompt_tokens","promptTokenCount","input_tokens","inputTokens"],completion_tokens:["completion_tokens","candidatesTokenCount","output_tokens","outputTokens"],total_tokens:["total_tokens","totalTokenCount"]};
