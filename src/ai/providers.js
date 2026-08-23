@@ -4,22 +4,25 @@ class AiProviderError extends Error{
   constructor(code,message){super(message);this.name="AiProviderError";this.code=code;}
 }
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function systemPrompt(){
-  return "Analyze the supplied GN market snapshot as read-only context. Never recommend or create orders. Return exactly one minified JSON object and nothing else: {summary:string,sentiment:'risk_off'|'neutral'|'risk_on',confidence:number,signals:string[]}. No markdown, no code fence, no preface.";
+function systemPrompt(provider){
+  const common="Analyze the supplied GN market snapshot as read-only context. Never recommend or create orders. Return exactly one minified JSON object and nothing else: {summary:string,sentiment:'risk_off'|'neutral'|'risk_on',confidence:number,signals:string[]}. No markdown, no code fence, no preface. Distinguish observed facts from inference. If a datum cannot be verified, do not invent it.";
+  if(provider?.name!=="perplexity")return `${common} Use only the supplied snapshot. Add GN_POLICY_SCORE:0 and GN_WAR_OVERRIDE:false to signals because no external current-event verification is requested from this provider.`;
+  return `${common} You are also the GN current-event sentinel. Using your current web/news capability, check only market-moving developments that are fresh and relevant as of the request time: White House and President Trump policy statements/actions, Treasury and Secretary Bessent, Federal Reserve/FOMC and Fed speakers, US Treasury yields/liquidity, Congress plus SEC/CFTC crypto policy, major Wall Street/ETF institutional flows, USD/DXY and USDKRW-sensitive policy, and major regulatory or fiscal announcements. Score the verified non-war policy/macro backdrop from -2 (strong risk-off) to +2 (strong risk-on). War or direct kinetic geopolitical escalation is NOT a normal score input: if a verified new war/escalation is severe enough to invalidate normal market scoring, set GN_WAR_OVERRIDE:true; otherwise false. Always include these exact machine-readable signal strings: GN_POLICY_SCORE:<-2|-1|0|1|2>, GN_WAR_OVERRIDE:<true|false>, and GN_POLICY_FACTORS:<brief verified factors>. Do not treat rumors or stale headlines as verified events.`;
 }
 function buildPayload(provider,input){
+  const prompt=systemPrompt(provider);
   if(provider.kind==="anthropic"){
     return {
       model:provider.model,
       max_tokens:Math.max(provider.maxOutputTokens,512),
       thinking:{type:"disabled"},
-      system:systemPrompt(),
+      system:prompt,
       messages:[{role:"user",content:[{type:"text",text:`GN snapshot:\n${JSON.stringify(input)}\n\nReturn only the JSON object.`}]}]
     };
   }
   if(provider.kind==="gemini"){
     return {
-      systemInstruction:{parts:[{text:systemPrompt()}]},
+      systemInstruction:{parts:[{text:prompt}]},
       contents:[{role:"user",parts:[{text:JSON.stringify(input)}]}],
       generationConfig:{
         maxOutputTokens:Math.max(provider.maxOutputTokens,512),
@@ -28,7 +31,7 @@ function buildPayload(provider,input){
       }
     };
   }
-  const payload={model:provider.model,messages:[{role:"system",content:systemPrompt()},{role:"user",content:JSON.stringify(input)}],max_tokens:provider.maxOutputTokens,stream:false};
+  const payload={model:provider.model,messages:[{role:"system",content:prompt},{role:"user",content:JSON.stringify(input)}],max_tokens:provider.maxOutputTokens,stream:false};
   if(provider.name==="deepseek")payload.thinking={type:"disabled"};
   return payload;
 }
@@ -46,7 +49,7 @@ function normalizeAnalysis(text){
   try{value=JSON.parse(raw);}catch{throw new AiProviderError("INVALID_RESPONSE","Provider response was not valid JSON");}
   const sentiment=["risk_off","neutral","risk_on"].includes(value.sentiment)?value.sentiment:"neutral";
   const confidence=Math.max(0,Math.min(1,Number(value.confidence)||0));
-  return {summary:String(value.summary||"").slice(0,1000),sentiment,confidence,signals:Array.isArray(value.signals)?value.signals.slice(0,10).map(x=>String(x).slice(0,300)):[]};
+  return {summary:String(value.summary||"").slice(0,1000),sentiment,confidence,signals:Array.isArray(value.signals)?value.signals.slice(0,12).map(x=>String(x).slice(0,300)):[]};
 }
 function providerErrorCode(provider,status,body){
   const msg=String(body?.error?.message||body?.message||"").toLowerCase();
@@ -68,14 +71,9 @@ async function fetchTransport({provider,endpoint,apiKey,payload,timeoutMs}){
   try{
     let url=endpoint;
     let headers={"Content-Type":"application/json","Accept":"application/json"};
-    if(provider.kind==="anthropic"){
-      headers={...headers,"x-api-key":apiKey,"anthropic-version":"2023-06-01"};
-    }else if(provider.kind==="gemini"){
-      url=`${endpoint}/models/${encodeURIComponent(provider.model)}:generateContent`;
-      headers={...headers,"x-goog-api-key":apiKey};
-    }else{
-      headers={...headers,"Authorization":`Bearer ${apiKey}`};
-    }
+    if(provider.kind==="anthropic")headers={...headers,"x-api-key":apiKey,"anthropic-version":"2023-06-01"};
+    else if(provider.kind==="gemini"){url=`${endpoint}/models/${encodeURIComponent(provider.model)}:generateContent`;headers={...headers,"x-goog-api-key":apiKey};}
+    else headers={...headers,"Authorization":`Bearer ${apiKey}`};
     const response=await fetch(url,{method:"POST",signal:controller.signal,headers,body:JSON.stringify(payload)});
     const body=await response.json().catch(()=>null);
     if(!response.ok)throw new AiProviderError(providerErrorCode(provider,response.status,body),`Provider returned HTTP ${response.status}`);
@@ -83,9 +81,7 @@ async function fetchTransport({provider,endpoint,apiKey,payload,timeoutMs}){
   }catch(error){if(error?.name==="AbortError")throw new AiProviderError("TIMEOUT","Provider request timed out");throw error;}
   finally{clearTimeout(timer);}
 }
-function transientGeminiError(error){
-  return ["GEMINI_UNAVAILABLE","HTTP_500","HTTP_502","HTTP_503","TIMEOUT"].includes(error?.code);
-}
+function transientGeminiError(error){return ["GEMINI_UNAVAILABLE","HTTP_500","HTTP_502","HTTP_503","TIMEOUT"].includes(error?.code);}
 async function invokeProvider(provider,input,transport=fetchTransport){
   if(!provider.enabled)return {provider:provider.name,model:provider.model,status:"disabled"};
   if(!provider.apiKey)throw new AiProviderError("MISSING_KEY",`${provider.name} API key is missing`);
@@ -98,20 +94,12 @@ async function invokeProvider(provider,input,transport=fetchTransport){
   if(provider.kind==="gemini"){
     let lastError;
     for(let attempt=0;attempt<4;attempt++){
-      try{return await run(provider);}catch(error){
-        lastError=error;
-        if(!transientGeminiError(error)||attempt===3)throw error;
-        await sleep([1000,3000,7000][attempt]);
-      }
+      try{return await run(provider);}catch(error){lastError=error;if(!transientGeminiError(error)||attempt===3)throw error;await sleep([1000,3000,7000][attempt]);}
     }
     throw lastError;
   }
   if(provider.kind==="anthropic"){
-    try{return await run(provider);}catch(error){
-      if(error?.code!=="INVALID_RESPONSE")throw error;
-      await sleep(800);
-      return run({...provider,maxOutputTokens:Math.max(provider.maxOutputTokens,768)});
-    }
+    try{return await run(provider);}catch(error){if(error?.code!=="INVALID_RESPONSE")throw error;await sleep(800);return run({...provider,maxOutputTokens:Math.max(provider.maxOutputTokens,768)});}
   }
   return run(provider);
 }
