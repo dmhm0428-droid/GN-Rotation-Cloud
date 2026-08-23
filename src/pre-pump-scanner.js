@@ -11,7 +11,7 @@ async function fetchJson(url,{fetchImpl=fetch,timeoutMs=10000}={}){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
-    const response=await fetchImpl(url,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"GN-Pre-Pump-Scanner-v2"}});
+    const response=await fetchImpl(url,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"GN-Pre-Pump-Scanner-v3"}});
     if(!response.ok)throw new Error(`Upbit quotation API returned HTTP ${response.status}`);
     return response.json();
   }finally{clearTimeout(timer);}
@@ -23,16 +23,75 @@ function price(candle,field){const value=Number(candle?.[field]);return Number.i
 function sumTurnover(candles){return candles.reduce((sum,c)=>sum+(Number(c.candle_acc_trade_price)||0),0);}
 function mean(values){const valid=values.map(Number).filter(Number.isFinite);return valid.length?valid.reduce((a,b)=>a+b,0)/valid.length:null;}
 
-function calculateObvDirection(ordered){
+function calculateObvSeries(ordered){
   const chronological=ordered.slice().reverse();
   let obv=0;const series=[];
   for(let index=0;index<chronological.length;index++){
-    if(index){const current=Number(chronological[index].trade_price),previous=Number(chronological[index-1].trade_price);const volume=Number(chronological[index].candle_acc_trade_volume)||0;if(current>previous)obv+=volume;else if(current<previous)obv-=volume;}
+    if(index){
+      const current=Number(chronological[index].trade_price),previous=Number(chronological[index-1].trade_price);
+      const volume=Number(chronological[index].candle_acc_trade_volume)||0;
+      if(current>previous)obv+=volume;else if(current<previous)obv-=volume;
+    }
     series.push(obv);
   }
+  return {chronological,series};
+}
+
+function calculateObvDirection(ordered){
+  const {chronological,series}=calculateObvSeries(ordered);
   const start=Math.max(0,series.length-16);
   const volume=chronological.slice(start+1).reduce((sum,c)=>sum+(Number(c.candle_acc_trade_volume)||0),0);
   return volume?Math.max(-1,Math.min(1,(series.at(-1)-series[start])/volume)):0;
+}
+
+function calculateObvPersistence(days){
+  const d=(days||[]).slice();
+  if(d.length<8)return {available:false,score:.5,obv3d:0,obv7d:0,positiveDays7:0,priceReturn3d:null,priceReturn7d:null,divergence:false};
+  const {chronological,series}=calculateObvSeries(d.slice(0,8));
+  const latestIndex=series.length-1;
+  const windowChange=lookback=>{
+    const start=Math.max(0,latestIndex-lookback);
+    const volume=chronological.slice(start+1).reduce((sum,c)=>sum+(Number(c.candle_acc_trade_volume)||0),0);
+    return volume?Math.max(-1,Math.min(1,(series[latestIndex]-series[start])/volume)):0;
+  };
+  const obv3d=windowChange(3),obv7d=windowChange(7);
+  let positiveDays7=0;
+  for(let i=Math.max(1,series.length-7);i<series.length;i++)if(series[i]>series[i-1])positiveDays7++;
+  const current=Number(d[0].trade_price),p3=Number(d[3]?.trade_price),p7=Number(d[7]?.trade_price);
+  const priceReturn3d=p3>0?current/p3-1:null,priceReturn7d=p7>0?current/p7-1:null;
+  const quietPrice=(Number.isFinite(priceReturn3d)&&priceReturn3d>=-.03&&priceReturn3d<=.07)&&(Number.isFinite(priceReturn7d)&&priceReturn7d>=-.06&&priceReturn7d<=.12);
+  const persistent=obv3d>=.10&&obv7d>=.08&&positiveDays7>=4;
+  const divergence=persistent&&quietPrice;
+  let score=.15;
+  if(obv7d>0)score+=Math.min(.25,obv7d*.35);
+  if(obv3d>0)score+=Math.min(.20,obv3d*.30);
+  score+=Math.min(.20,positiveDays7/7*.20);
+  if(quietPrice)score+=.10;
+  if(divergence)score+=.10;
+  if(Number.isFinite(priceReturn3d)&&priceReturn3d>.12)score-=.20;
+  if(Number.isFinite(priceReturn7d)&&priceReturn7d>.25)score-=.20;
+  return {available:true,score:Math.max(0,Math.min(1,score)),obv3d,obv7d,positiveDays7,priceReturn3d,priceReturn7d,divergence};
+}
+
+function calculateTurnoverPersistence(days){
+  const d=(days||[]).slice();
+  if(d.length<10)return {available:false,score:.5,ratio3d:null,risingDays3:0};
+  const recent=d.slice(0,3).map(x=>Number(x.candle_acc_trade_price)||0);
+  const prior=d.slice(3,10).map(x=>Number(x.candle_acc_trade_price)||0);
+  const priorAvg=mean(prior),recentAvg=mean(recent);
+  const ratio3d=priorAvg>0?recentAvg/priorAvg:null;
+  let risingDays3=0;
+  const chronological=recent.slice().reverse();
+  for(let i=1;i<chronological.length;i++)if(chronological[i]>=chronological[i-1]*.90)risingDays3++;
+  let score=.25;
+  if(Number.isFinite(ratio3d)){
+    if(ratio3d>=1.15&&ratio3d<=2.5)score=.75;
+    else if(ratio3d>=.9&&ratio3d<1.15)score=.55;
+    else if(ratio3d>2.5&&ratio3d<=4)score=.45;
+    else if(ratio3d>4)score=.15;
+  }
+  if(risingDays3===2)score+=.15;
+  return {available:true,score:Math.max(0,Math.min(1,score)),ratio3d,risingDays3};
 }
 
 function calculate15mStructure(ordered){
@@ -82,17 +141,17 @@ function calculateMetrics(market,candles){
   return {market,symbol:market.replace(/^KRW-/,""),return5m:latestPrice/price5-1,return15m:latestPrice/price15-1,turnoverGrowth15m:turnover/previousTurnover-1,obvDirection:calculateObvDirection(ordered),higherLow15m:structure15m.higherLow,resistanceProximity15m:structure15m.resistanceProximity,structure1h,highDistance1h:highDistance1h(ordered),pullbackRebreak1h:structure15m.higherLow&&structure1h==="sideways_breakout"};
 }
 
-function percentileRanks(rows,key){const sorted=rows.map(row=>row[key]).slice().sort((a,b)=>a-b);const scale=Math.max(1,sorted.length-1);return new Map(rows.map(row=>[row.market,sorted.indexOf(row[key])/scale]));}
+function percentileRanks(rows,key){const sorted=rows.map(row=>Number(row[key])||0).slice().sort((a,b)=>a-b);const scale=Math.max(1,sorted.length-1);return new Map(rows.map(row=>[row.market,sorted.indexOf(Number(row[key])||0)/scale]));}
 
 function derivativeScore(data,spotReturn15m){
   if(!data)return {score:.5,overheated:false,available:false};
   const oi=Number(data.oiGrowth);let oiScore=.5;
-  if(Number.isFinite(oi)&&spotReturn15m>0){if(oi>=.05)oiScore=1;else if(oi>=.01)oiScore=.75;else if(oi<=-.05)oiScore=.1;else if(oi<-.01)oiScore=.3;}
+  if(Number.isFinite(oi)&&spotReturn15m>0){if(oi>=.05)oiScore=.8;else if(oi>=.01)oiScore=1;else if(oi<=-.05)oiScore=.1;else if(oi<-.01)oiScore=.3;}
   const funding=Number(data.fundingRate);let fundingScore=.5;
-  if(Number.isFinite(funding)){if(funding>.0007)fundingScore=0;else if(funding>=-.0001&&funding<=.0003)fundingScore=1;else if(funding<=.0005)fundingScore=.7;else if(funding<-.0005)fundingScore=.3;}
+  if(Number.isFinite(funding)){if(funding>.0007)fundingScore=0;else if(funding>=-.0001&&funding<=.0003)fundingScore=1;else if(funding<=.0005)fundingScore=.65;else if(funding<-.0005)fundingScore=.3;}
   const shortGrowth=Number(data.shortLiquidationGrowth),longGrowth=Number(data.longLiquidationGrowth);let liquidationScore=.5;
-  if(Number.isFinite(shortGrowth)||Number.isFinite(longGrowth)){const short=Number.isFinite(shortGrowth)?shortGrowth:0;const long=Number.isFinite(longGrowth)?longGrowth:0;if(long>=2&&long>short)liquidationScore=.05;else if(long>=1&&long>short)liquidationScore=.2;else if(short>=2&&short>long)liquidationScore=1;else if(short>0&&short>long)liquidationScore=.75;}
-  const overheated=(Number.isFinite(funding)&&funding>.0007)||(Number.isFinite(longGrowth)&&longGrowth>=2);
+  if(Number.isFinite(shortGrowth)||Number.isFinite(longGrowth)){const short=Number.isFinite(shortGrowth)?shortGrowth:0;const long=Number.isFinite(longGrowth)?longGrowth:0;if(long>=2&&long>short)liquidationScore=.05;else if(long>=1&&long>short)liquidationScore=.2;else if(short>=2&&short>long)liquidationScore=.85;else if(short>0&&short>long)liquidationScore=.7;}
+  const overheated=(Number.isFinite(funding)&&funding>.0007)||(Number.isFinite(longGrowth)&&longGrowth>=2)||(Number.isFinite(oi)&&oi>=.10&&spotReturn15m>=.05);
   return {score:oiScore*.4+fundingScore*.35+liquidationScore*.25,overheated,available:true};
 }
 
@@ -106,16 +165,21 @@ function highChasePenalty(row){
 }
 
 function scoreCandidates(metrics,derivatives={}){
-  const eligible=metrics.filter(row=>row&&row.return5m>0&&row.return15m>0&&row.return15m<0.10&&row.turnoverGrowth15m>0);if(!eligible.length)return [];
+  const eligible=metrics.filter(row=>row&&row.return5m>-.01&&row.return15m>-.015&&row.return15m<0.10&&row.turnoverGrowth15m>0);if(!eligible.length)return [];
   const r5=percentileRanks(eligible,"return5m"),r15=percentileRanks(eligible,"return15m"),volume=percentileRanks(eligible,"turnoverGrowth15m");
   const obvRows=eligible.map(row=>({...row,obvDirection:Number(row.obvDirection)||0}));const obv=percentileRanks(obvRows,"obvDirection");
   return eligible.map(row=>{
-    const proximity=resistanceScore(row.resistanceProximity15m),structure15=(row.higherLow15m?.6:0)+proximity*.4;
-    const structure1h={sideways_breakout:1,uptrend:.7,neutral:.45,unknown:.35,downtrend:0}[row.structure1h||"unknown"]??.35;
-    const spotScore=100*(r5.get(row.market)*.18+r15.get(row.market)*.17+volume.get(row.market)*.20+obv.get(row.market)*.20+structure15*.15+structure1h*.10);
+    const proximity=Number.isFinite(row.resistanceProximity15m)?resistanceScore(row.resistanceProximity15m):.5;
+    const higherLowBase=row.higherLow15m===true?.6:row.higherLow15m===false?0:.3;
+    const structure15=higherLowBase+proximity*.4;
+    const structure1h={sideways_breakout:1,uptrend:.7,neutral:.45,unknown:.5,downtrend:0}[row.structure1h||"unknown"]??.5;
+    const spotScore=100*(r5.get(row.market)*.05+r15.get(row.market)*.05+volume.get(row.market)*.20+obv.get(row.market)*.25+structure15*.25+structure1h*.20);
     const derivative=derivativeScore(derivatives[row.market],row.return15m),prePenaltyScore=spotScore*.85+derivative.score*100*.15,chase=highChasePenalty(row);
-    const score=Math.max(0,prePenaltyScore-chase.points);let state=stateOf(score,derivative.overheated);if(chase.entryBlocked&&state==="ENTRY")state="SCOUT";
-    return {...row,derivativeScore:+(derivative.score*100).toFixed(2),derivativeDataAvailable:derivative.available,highChasePenalty:chase.points,highChaseRisk:chase.entryBlocked,intradayScore:+score.toFixed(2),score:+score.toFixed(2),state};
+    let extraPenalty=0;
+    if(row.return15m>=.07)extraPenalty+=8;else if(row.return15m>=.05)extraPenalty+=4;
+    if(row.turnoverGrowth15m>=4)extraPenalty+=4;
+    const score=Math.max(0,prePenaltyScore-chase.points-extraPenalty);let state=stateOf(score,derivative.overheated);if(chase.entryBlocked&&state==="ENTRY")state="SCOUT";
+    return {...row,derivativeScore:+(derivative.score*100).toFixed(2),derivativeDataAvailable:derivative.available,highChasePenalty:chase.points+extraPenalty,highChaseRisk:chase.entryBlocked||extraPenalty>=8,intradayScore:+score.toFixed(2),score:+score.toFixed(2),state};
   }).sort((a,b)=>b.score-a.score||b.turnoverGrowth15m-a.turnoverGrowth15m);
 }
 
@@ -130,34 +194,36 @@ function dailyIgnition(days){
   if(d.length<21)return {dailyIgnitionScore:50,dailyIgnitionStage:"UNKNOWN",dailyIgnitionReasons:[],dailyIgnitionAvailable:false};
   const current=Number(d[0].trade_price);if(!Number.isFinite(current)||current<=0)return {dailyIgnitionScore:50,dailyIgnitionStage:"UNKNOWN",dailyIgnitionReasons:[],dailyIgnitionAvailable:false};
   const prior20=d.slice(1,21),recent5=d.slice(0,5),prior5=d.slice(5,10);
-  const avgTurnover20=mean(prior20.map(x=>x.candle_acc_trade_price));
-  const recentTurnover=mean(d.slice(0,3).map(x=>x.candle_acc_trade_price));
-  const turnoverRatio=avgTurnover20>0?recentTurnover/avgTurnover20:null;
   const recentLow=Math.min(...recent5.map(x=>price(x,"low_price")));
   const priorLow=Math.min(...prior5.map(x=>price(x,"low_price")));
-  const higherLow=Number.isFinite(recentLow)&&Number.isFinite(priorLow)&&recentLow>priorLow;
+  const higherLow=Number.isFinite(recentLow)&&Number.isFinite(priorLow)&&recentLow>=priorLow*.995;
   const resistance=Math.max(...prior20.map(x=>price(x,"high_price")));
   const resistanceDistance=resistance>0?current/resistance-1:null;
   const rsi=rsi14(d);
   const close5=mean(d.slice(0,5).map(x=>x.trade_price));
   const close20=mean(d.slice(0,20).map(x=>x.trade_price));
-  const maRecovery=Number.isFinite(close5)&&Number.isFinite(close20)&&current>=close5&&close5>=close20*.985;
+  const maRecovery=Number.isFinite(close5)&&Number.isFinite(close20)&&current>=close5*.99&&close5>=close20*.985;
   const range7High=Math.max(...d.slice(0,7).map(x=>price(x,"high_price"))),range7Low=Math.min(...d.slice(0,7).map(x=>price(x,"low_price")));
   const range20High=Math.max(...d.slice(1,21).map(x=>price(x,"high_price"))),range20Low=Math.min(...d.slice(1,21).map(x=>price(x,"low_price")));
   const range7=current>0?(range7High-range7Low)/current:null,range20=current>0?(range20High-range20Low)/current:null;
-  const compressed=Number.isFinite(range7)&&Number.isFinite(range20)&&range20>0&&range7/range20<=.55;
-  const obv=calculateObvDirection(d);
+  const compressed=Number.isFinite(range7)&&Number.isFinite(range20)&&range20>0&&range7/range20<=.60;
+  const obvPersistence=calculateObvPersistence(d),turnoverPersistence=calculateTurnoverPersistence(d);
   let score=0;const reasons=[];
-  if(Number.isFinite(turnoverRatio)){if(turnoverRatio>=1.6&&turnoverRatio<=3.5){score+=22;reasons.push(`D turnover x${turnoverRatio.toFixed(1)}`);}else if(turnoverRatio>=1.2){score+=14;reasons.push(`D turnover x${turnoverRatio.toFixed(1)}`);}else if(turnoverRatio>=.9)score+=7;}
-  if(higherLow){score+=16;reasons.push("D higher-low");}
-  if(Number.isFinite(rsi)){if(rsi>=50&&rsi<=64){score+=18;reasons.push(`D RSI ${rsi.toFixed(0)}`);}else if(rsi>=45&&rsi<50){score+=12;reasons.push(`D RSI ${rsi.toFixed(0)}`);}else if(rsi>64&&rsi<70)score+=6;}
-  if(maRecovery){score+=15;reasons.push("D MA recovery");}
-  if(Number.isFinite(resistanceDistance)){if(resistanceDistance>=-.07&&resistanceDistance<=.015){score+=16;reasons.push(`D resistance ${(resistanceDistance*100).toFixed(1)}%`);}else if(resistanceDistance>=-.12&&resistanceDistance<-.07)score+=8;}
-  if(compressed){score+=8;reasons.push("D compression");}
-  if(obv>=.15){score+=5;reasons.push("D OBV up");}
+  score+=obvPersistence.score*30;
+  if(obvPersistence.divergence)reasons.push("3-7D OBV leads price");
+  else if(obvPersistence.obv7d>0)reasons.push("7D OBV persistent");
+  score+=turnoverPersistence.score*18;
+  if(Number.isFinite(turnoverPersistence.ratio3d)&&turnoverPersistence.ratio3d>=1.15&&turnoverPersistence.ratio3d<=2.5)reasons.push(`3D turnover x${turnoverPersistence.ratio3d.toFixed(1)}`);
+  if(higherLow){score+=12;reasons.push("D higher-low/absorption");}
+  if(Number.isFinite(rsi)){if(rsi>=45&&rsi<=60){score+=12;reasons.push(`D RSI ${rsi.toFixed(0)}`);}else if(rsi>60&&rsi<=65)score+=7;else if(rsi>=68)score-=6;}
+  if(maRecovery){score+=8;reasons.push("D MA recovery");}
+  if(Number.isFinite(resistanceDistance)){if(resistanceDistance>=-.08&&resistanceDistance<=-.005){score+=10;reasons.push(`D resistance ${(resistanceDistance*100).toFixed(1)}%`);}else if(resistanceDistance>-.005&&resistanceDistance<=.02)score+=5;}
+  if(compressed){score+=10;reasons.push("D compression");}
+  if(Number.isFinite(obvPersistence.priceReturn3d)&&obvPersistence.priceReturn3d>.12)score-=12;
+  if(Number.isFinite(obvPersistence.priceReturn7d)&&obvPersistence.priceReturn7d>.25)score-=12;
   score=Math.max(0,Math.min(100,score));
-  const stage=score>=75?"IGNITION":score>=60?"PRE_IGNITION":score>=45?"ACCUMULATION":"WAIT";
-  return {dailyIgnitionScore:+score.toFixed(2),dailyIgnitionStage:stage,dailyIgnitionReasons:reasons.slice(0,6),dailyIgnitionAvailable:true,dailyTurnoverRatio:Number.isFinite(turnoverRatio)?+turnoverRatio.toFixed(2):null,dailyResistanceDistance:Number.isFinite(resistanceDistance)?+resistanceDistance.toFixed(4):null,dailyRsi:Number.isFinite(rsi)?+rsi.toFixed(2):null,dailyHigherLow:higherLow,dailyCompression:compressed,dailyObvDirection:+obv.toFixed(3)};
+  const stage=score>=78?"IGNITION":score>=62?"PRESSURE":score>=48?"ACCUMULATION":"WAIT";
+  return {dailyIgnitionScore:+score.toFixed(2),dailyIgnitionStage:stage,dailyIgnitionReasons:reasons.slice(0,7),dailyIgnitionAvailable:true,dailyTurnoverRatio:Number.isFinite(turnoverPersistence.ratio3d)?+turnoverPersistence.ratio3d.toFixed(2):null,dailyResistanceDistance:Number.isFinite(resistanceDistance)?+resistanceDistance.toFixed(4):null,dailyRsi:Number.isFinite(rsi)?+rsi.toFixed(2):null,dailyHigherLow:higherLow,dailyCompression:compressed,dailyObvDirection:+obvPersistence.obv7d.toFixed(3),obv3d:+obvPersistence.obv3d.toFixed(3),obv7d:+obvPersistence.obv7d.toFixed(3),obvPositiveDays7:obvPersistence.positiveDays7,obvPriceDivergence:obvPersistence.divergence,accumulationPersistenceScore:+(obvPersistence.score*100).toFixed(2),turnoverPersistenceScore:+(turnoverPersistence.score*100).toFixed(2)};
 }
 
 function latePumpRisk(days){
@@ -167,10 +233,10 @@ function latePumpRisk(days){
   const recentVol=d.slice(0,3).reduce((s,x)=>s+(Number(x.candle_acc_trade_price)||0),0)/3;
   const prior=d.slice(3,10),priorVol=prior.length?prior.reduce((s,x)=>s+(Number(x.candle_acc_trade_price)||0),0)/prior.length:0;
   const volumeRatio3d=priorVol>0?recentVol/priorVol:null,rsi=rsi14(d);let penalty=0;const reasons=[];
-  if(Number.isFinite(return3d)&&return3d>=.25){penalty+=24;reasons.push(`3d +${(return3d*100).toFixed(0)}%`);}else if(Number.isFinite(return3d)&&return3d>=.15){penalty+=14;reasons.push(`3d +${(return3d*100).toFixed(0)}%`);}
-  if(Number.isFinite(return7d)&&return7d>=.45){penalty+=16;reasons.push(`7d +${(return7d*100).toFixed(0)}%`);}
+  if(Number.isFinite(return3d)&&return3d>=.25){penalty+=28;reasons.push(`3d +${(return3d*100).toFixed(0)}%`);}else if(Number.isFinite(return3d)&&return3d>=.15){penalty+=18;reasons.push(`3d +${(return3d*100).toFixed(0)}%`);}else if(Number.isFinite(return3d)&&return3d>=.10){penalty+=8;reasons.push(`3d +${(return3d*100).toFixed(0)}%`);}
+  if(Number.isFinite(return7d)&&return7d>=.45){penalty+=18;reasons.push(`7d +${(return7d*100).toFixed(0)}%`);}else if(Number.isFinite(return7d)&&return7d>=.30){penalty+=10;reasons.push(`7d +${(return7d*100).toFixed(0)}%`);}
   if(Number.isFinite(rsi)&&rsi>=75){penalty+=18;reasons.push(`RSI ${rsi.toFixed(0)}`);}else if(Number.isFinite(rsi)&&rsi>=68){penalty+=8;reasons.push(`RSI ${rsi.toFixed(0)}`);}
-  if(Number.isFinite(volumeRatio3d)&&volumeRatio3d>=3){penalty+=10;reasons.push(`3d volume x${volumeRatio3d.toFixed(1)}`);}
+  if(Number.isFinite(volumeRatio3d)&&volumeRatio3d>=4){penalty+=12;reasons.push(`3d volume x${volumeRatio3d.toFixed(1)}`);}else if(Number.isFinite(volumeRatio3d)&&volumeRatio3d>=3){penalty+=6;reasons.push(`3d volume x${volumeRatio3d.toFixed(1)}`);}
   const blocked=(Number.isFinite(return3d)&&return3d>=.20)||(Number.isFinite(rsi)&&rsi>=75)||penalty>=24;
   return {latePumpRisk:blocked,latePumpPenalty:penalty,latePumpReasons:reasons,return3d,return7d,rsi14:rsi,volumeRatio3d};
 }
@@ -181,10 +247,11 @@ async function enrichLatePumpRisk(rows,{fetchImpl=fetch,limit=DAILY_RISK_TOP_N}=
     const days=await fetchJson(`${UPBIT_BASE}/v1/candles/days?market=${encodeURIComponent(row.market)}&count=${DAILY_RISK_COUNT}`,{fetchImpl});
     const risk=latePumpRisk(days),ignition=dailyIgnition(days);
     const baseAfterLate=Math.max(0,row.score-risk.latePumpPenalty);
-    const score=ignition.dailyIgnitionAvailable?baseAfterLate*.75+ignition.dailyIgnitionScore*.25:baseAfterLate;
+    const score=ignition.dailyIgnitionAvailable?baseAfterLate*.60+ignition.dailyIgnitionScore*.40:baseAfterLate;
     let state=row.state;
     if(risk.latePumpRisk&&state==="ENTRY")state="NO_CHASE";
-    else if(ignition.dailyIgnitionAvailable&&ignition.dailyIgnitionScore<45&&state==="ENTRY")state="SCOUT";
+    else if(ignition.dailyIgnitionAvailable&&ignition.dailyIgnitionScore<48&&state==="ENTRY")state="SCOUT";
+    else if(ignition.dailyIgnitionAvailable&&ignition.accumulationPersistenceScore<45&&state==="ENTRY")state="SCOUT";
     else if(score<70&&state==="ENTRY")state="SCOUT";
     return {...row,...risk,...ignition,score:+score.toFixed(2),state};
   }));
@@ -200,7 +267,7 @@ async function scanPrePump({fetchImpl=fetch,sleep=ms=>new Promise(resolve=>setTi
   const krwMarkets=(markets||[]).map(row=>row.market).filter(market=>market?.startsWith("KRW-")).sort();const metrics=[];
   for(let index=0;index<krwMarkets.length;index+=batchSize){const batch=krwMarkets.slice(index,index+batchSize);const results=await Promise.allSettled(batch.map(async market=>{const url=`${UPBIT_BASE}/v1/candles/minutes/1?market=${encodeURIComponent(market)}&count=${CANDLES_PER_MARKET}`;return calculateMetrics(market,await fetchJson(url,{fetchImpl}));}));for(const result of results)if(result.status==="fulfilled"&&result.value)metrics.push(result.value);if(index+batchSize<krwMarkets.length)await sleep(batchDelayMs);}
   const enriched=await enrichLatePumpRisk(scoreCandidates(metrics,derivatives),{fetchImpl});
-  return enriched.filter(row=>row.score>=50&&(row.state==="SCOUT"||row.state==="ENTRY")&&(!row.dailyIgnitionAvailable||row.dailyIgnitionScore>=45)).slice(0,3);
+  return enriched.filter(row=>row.score>=50&&(row.state==="SCOUT"||row.state==="ENTRY")&&(!row.dailyIgnitionAvailable||row.dailyIgnitionScore>=48)).slice(0,3);
 }
 
-module.exports={calculate15mStructure,calculateMetrics,calculateObvDirection,classify1hStructure,dailyIgnition,derivativeScore,enrichLatePumpRisk,fetchJson,highChasePenalty,highDistance1h,latePumpRisk,rankCandidates,resistanceScore,rsi14,scanPrePump,scoreCandidates,stateOf,sumTurnover};
+module.exports={calculate15mStructure,calculateMetrics,calculateObvDirection,calculateObvPersistence,calculateTurnoverPersistence,classify1hStructure,dailyIgnition,derivativeScore,enrichLatePumpRisk,fetchJson,highChasePenalty,highDistance1h,latePumpRisk,rankCandidates,resistanceScore,rsi14,scanPrePump,scoreCandidates,stateOf,sumTurnover};
