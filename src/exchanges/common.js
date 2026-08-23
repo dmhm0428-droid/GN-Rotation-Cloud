@@ -2,7 +2,10 @@
 const crypto=require("crypto");
 
 function b64url(input){return Buffer.from(input).toString("base64url");}
-function jwtHS256(payload,secret){const header=b64url(JSON.stringify({alg:"HS256",typ:"JWT"}));const body=b64url(JSON.stringify(payload));const sig=crypto.createHmac("sha256",secret).update(`${header}.${body}`).digest("base64url");return `${header}.${body}.${sig}`;}
+function jwtHmac(payload,secret,{alg="HS256",hash="sha256"}={}){const header=b64url(JSON.stringify({alg,typ:"JWT"}));const body=b64url(JSON.stringify(payload));const sig=crypto.createHmac(hash,secret).update(`${header}.${body}`).digest("base64url");return `${header}.${body}.${sig}`;}
+function jwtHS256(payload,secret){return jwtHmac(payload,secret,{alg:"HS256",hash:"sha256"});}
+function jwtHS512(payload,secret){return jwtHmac(payload,secret,{alg:"HS512",hash:"sha512"});}
+function cleanSecret(v){return typeof v==="string"?v.trim():v;}
 function errorDetail(data){
   if(!data)return "";
   const parts=[];
@@ -38,4 +41,4 @@ async function requestJson(url,{method="GET",headers={},body,fetchImpl=fetch}={}
 }
 const num=v=>Number.isFinite(Number(v))?Number(v):0;
 function normalizeBalance(exchange,row){return {exchange,asset:String(row.asset||"").toUpperCase(),free:num(row.free),locked:num(row.locked),total:num(row.free)+num(row.locked),avgPrice:row.avgPrice==null?null:num(row.avgPrice)};}
-module.exports={jwtHS256,requestJson,num,normalizeBalance};
+module.exports={jwtHS256,jwtHS512,cleanSecret,requestJson,num,normalizeBalance};
