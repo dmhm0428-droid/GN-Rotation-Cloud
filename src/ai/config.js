@@ -1,7 +1,7 @@
 "use strict";
 
 const PROVIDERS = {
-  perplexity: { env: "PERPLEXITY", kind: "openai", model: "sonar", endpoint: "https://api.perplexity.ai/chat/completions", estimatedCostUsd: 0.005 },
+  perplexity: { env: "PERPLEXITY", kind: "openai", model: "sonar", endpoint: "https://api.perplexity.ai/v1/sonar", estimatedCostUsd: 0.005 },
   xai: { env: "XAI", kind: "openai", model: "grok-4.3", endpoint: "https://api.x.ai/v1/chat/completions", estimatedCostUsd: 0.003 },
   deepseek: { env: "DEEPSEEK", kind: "openai", model: "deepseek-v4-flash", endpoint: "https://api.deepseek.com/chat/completions", estimatedCostUsd: 0.001 },
   anthropic: { env: "ANTHROPIC", kind: "anthropic", model: "claude-sonnet-5", endpoint: "https://api.anthropic.com/v1/messages", estimatedCostUsd: 0.008 },
