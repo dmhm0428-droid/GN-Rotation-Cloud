@@ -28,17 +28,30 @@ function buildPayload(provider,input){
 }
 function responseText(provider,body){
   if(provider.kind==="anthropic")return body?.content?.find(x=>x?.type==="text")?.text;
-  if(provider.kind==="gemini")return body?.candidates?.[0]?.content?.parts?.map(x=>x?.text||"").join("");
+  if(provider.kind==="gemini")return body?.candidates?.[0]?.content?.parts?.filter(x=>!x?.thought).map(x=>x?.text||"").join("");
   return body?.choices?.[0]?.message?.content;
 }
 function normalizeAnalysis(text){
+  let raw=String(text||"").trim();
+  raw=raw.replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();
+  const first=raw.indexOf("{");const last=raw.lastIndexOf("}");
+  if(first>=0&&last>first)raw=raw.slice(first,last+1);
   let value;
-  try{value=JSON.parse(text);}catch{throw new AiProviderError("INVALID_RESPONSE","Provider response was not valid JSON");}
+  try{value=JSON.parse(raw);}catch{throw new AiProviderError("INVALID_RESPONSE","Provider response was not valid JSON");}
   const sentiment=["risk_off","neutral","risk_on"].includes(value.sentiment)?value.sentiment:"neutral";
   const confidence=Math.max(0,Math.min(1,Number(value.confidence)||0));
   return {summary:String(value.summary||"").slice(0,1000),sentiment,confidence,signals:Array.isArray(value.signals)?value.signals.slice(0,10).map(x=>String(x).slice(0,300)):[]};
 }
 function providerErrorCode(provider,status,body){
+  const msg=String(body?.error?.message||body?.message||"").toLowerCase();
+  if(provider.kind==="anthropic"){
+    if(/credit balance|billing|purchase credits|insufficient credit/.test(msg))return "ANTHROPIC_BILLING_REQUIRED";
+    if(/model/.test(msg)&&/not found|invalid|unavailable|access/.test(msg))return "ANTHROPIC_MODEL_ACCESS";
+  }
+  if(provider.kind==="gemini"){
+    if(/model/.test(msg)&&/not found|unsupported|unavailable/.test(msg))return "GEMINI_MODEL_ACCESS";
+    if(/quota|billing|resource exhausted/.test(msg))return "GEMINI_QUOTA_OR_BILLING";
+  }
   const raw=body?.error?.type||body?.error?.status||body?.type||"";
   const safe=String(raw).toUpperCase().replace(/[^A-Z0-9_]+/g,"_").slice(0,48);
   return safe?`${provider.name.toUpperCase()}_${safe}`:`HTTP_${status}`;
@@ -74,12 +87,8 @@ async function invokeProvider(provider,input,transport=fetchTransport){
   };
   try{return await run(provider);}
   catch(error){
-    if(provider.kind==="anthropic" && /INVALID_REQUEST|HTTP_400/.test(error?.code||"")){
-      return run({...provider,model:"claude-sonnet-5"});
-    }
-    if(provider.kind==="gemini" && /NOT_FOUND|HTTP_404/.test(error?.code||"")){
-      return run({...provider,model:"gemini-3.7-flash"});
-    }
+    if(provider.kind==="anthropic" && /INVALID_REQUEST|HTTP_400/.test(error?.code||""))return run({...provider,model:"claude-sonnet-5"});
+    if(provider.kind==="gemini" && /NOT_FOUND|HTTP_404/.test(error?.code||""))return run({...provider,model:"gemini-3.7-flash"});
     throw error;
   }
 }
