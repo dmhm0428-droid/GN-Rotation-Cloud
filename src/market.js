@@ -105,6 +105,30 @@ async function fundingBreadth(){
   catch{return fundingBreadthBybit();}
 }
 
+async function latestFundingFromSupabase(){
+  const url=process.env.SUPABASE_URL;
+  const key=process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if(!url||!key)throw new Error("supabase fallback env missing");
+  const rows=await fetchJson(`${url}/rest/v1/gn_market_snapshots?select=funding_positive,funding_median,funding_hot,ts&order=ts.desc&limit=1`,{
+    headers:{apikey:key,Authorization:`Bearer ${key}`}
+  });
+  const r=Array.isArray(rows)?rows[0]:null;
+  if(!r||r.funding_hot==null)throw new Error("supabase funding fallback empty");
+  const hot=Number(r.funding_hot);
+  const med=Number(r.funding_median);
+  const positive=Number(r.funding_positive);
+  if(!Number.isFinite(hot))throw new Error("supabase funding fallback invalid");
+  return {
+    count:null,
+    positive:Number.isFinite(positive)?positive:null,
+    median:Number.isFinite(med)?med:null,
+    hot,
+    veryHot:null,
+    source:"supabase_cache",
+    cachedAt:r.ts
+  };
+}
+
 async function takerRatioBinance(symbol="BTCUSDT"){
   const rows=await retry(()=>fetchJson(`${FUTURES_BASE}/futures/data/takerlongshortRatio?symbol=${symbol}&period=5m&limit=12`));
   if(!Array.isArray(rows)||!rows.length)throw new Error("binance taker ratio empty");
@@ -159,8 +183,8 @@ function scoreMarket({spot,funding,taker,btc,macroScore=5}){
   let leverage=50;
   if(funding){
     leverage -= Math.max(0,(funding.hot-0.10))*130;
-    leverage -= Math.max(0,(funding.veryHot-0.03))*160;
-    if(Math.abs(funding.median)<0.00015)leverage+=8;
+    if(funding.veryHot!=null)leverage -= Math.max(0,(funding.veryHot-0.03))*160;
+    if(funding.median!=null && Math.abs(funding.median)<0.00015)leverage+=8;
   }
   leverage=clamp(leverage);
 
@@ -201,12 +225,20 @@ async function collectLiveMarket({btc=null,macroScore=5}={}){
   const parts=await Promise.allSettled([spotBreadth(),fundingBreadth(),takerRatio("BTCUSDT"),takerRatio("ETHUSDT")]);
   const [s,f,b,e]=parts;
   const spot=s.status==="fulfilled"?s.value:null;
-  const funding=f.status==="fulfilled"?f.value:null;
+  let funding=f.status==="fulfilled"?f.value:null;
   const btcTaker=b.status==="fulfilled"?b.value:null;
   const ethTaker=e.status==="fulfilled"?e.value:null;
   const errors={};
   if(!spot)errors.spot=String(s.reason?.message||s.reason);
-  if(!funding)errors.funding=String(f.reason?.message||f.reason);
+  if(!funding){
+    errors.funding=String(f.reason?.message||f.reason);
+    try{
+      funding=await latestFundingFromSupabase();
+      errors.fundingFallback="supabase_cache";
+    }catch(err){
+      errors.fundingFallback=String(err?.message||err);
+    }
+  }
   if(!btcTaker)errors.btcTaker=String(b.reason?.message||b.reason);
   if(!ethTaker)errors.ethTaker=String(e.reason?.message||e.reason);
   const decision=scoreMarket({spot,funding,taker:btcTaker,btc,macroScore});
