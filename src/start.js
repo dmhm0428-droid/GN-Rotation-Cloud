@@ -6,30 +6,27 @@ const PROVIDERS=["PERPLEXITY","XAI","DEEPSEEK","ANTHROPIC","GEMINI"];
 
 function aiEnv(){
   const env={...process.env,AI_ANALYSIS_ENABLED:"true"};
-  for(const name of PROVIDERS){
-    env[`${name}_ENABLED`]=env[`${name}_API_KEY`]?"true":"false";
-  }
+  // Always enable the five configured providers. If a secret is missing or a
+  // provider rejects a request, ai-runner persists that provider's error row
+  // in gn_ai_analyses instead of silently producing no data.
+  for(const name of PROVIDERS)env[`${name}_ENABLED`]="true";
   return env;
 }
 
 function runAi(){
-  const enabled=PROVIDERS.filter(name=>process.env[`${name}_API_KEY`]);
-  if(!enabled.length){
-    console.warn("GN AI scheduler: no provider API keys found in dashboard environment");
-    return;
-  }
   const child=spawn(process.execPath,["src/ai-runner.js"],{env:aiEnv(),stdio:"inherit"});
   child.on("exit",code=>{
     if(code!==0)console.error(`GN AI scheduler exited with code ${code}`);
   });
+  child.on("error",error=>console.error("GN AI scheduler spawn error",error?.message||error));
 }
 
 const server=spawn(process.execPath,["src/server.js"],{env:process.env,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
 
-// Run once shortly after boot, then every 15 minutes. This makes the existing
-// dashboard service itself the fallback AI runner, so GN does not depend on a
-// separately-created Render Cron before AI results reach Supabase.
+// Run once shortly after boot, then every 15 minutes. The dashboard service is
+// the canonical fallback so the five-provider analysis does not depend on a
+// separately-created Render Cron service.
 setTimeout(runAi,10000);
 setInterval(runAi,15*60*1000).unref();
 
