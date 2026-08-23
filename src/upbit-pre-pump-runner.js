@@ -3,6 +3,26 @@
 const {scanPrePump}=require("./pre-pump-scanner");
 const {savePrePumpScan}=require("./pre-pump-store");
 
+const DEFAULT_BLOCKED_MARKETS=new Set(["KRW-STORJ"]);
+
+function blockedMarketSet(env=process.env){
+  const configured=(env.PRE_PUMP_BLOCKED_MARKETS||"").split(",").map(value=>value.trim().toUpperCase()).filter(Boolean);
+  return new Set([...DEFAULT_BLOCKED_MARKETS,...configured]);
+}
+
+async function filterUnsafeCandidates(rows,{fetchImpl=fetch,env=process.env}={}){
+  const blocked=blockedMarketSet(env);
+  let caution=new Set();
+  try{
+    const response=await fetchImpl("https://api.upbit.com/v1/market/all?isDetails=true",{headers:{Accept:"application/json","User-Agent":"GN-Pre-Pump-Runner-v2"}});
+    if(response.ok){
+      const markets=await response.json();
+      caution=new Set((markets||[]).filter(row=>row?.market_warning==="CAUTION").map(row=>row.market));
+    }
+  }catch{}
+  return (rows||[]).filter(row=>row?.market&&!blocked.has(row.market)&&!caution.has(row.market));
+}
+
 async function enrichKrwPrices(rows,{fetchImpl=fetch}={}){
   if(!rows.length)return rows;
   const markets=rows.map(row=>row.market).join(",");
@@ -29,7 +49,8 @@ function formatResult(row){
 
 async function runUpbitPrePump({scanner=scanPrePump,save=savePrePumpScan,env=process.env,fetchImpl=fetch,...scanOptions}={}){
   const results=await scanner({...scanOptions,fetchImpl});
-  const top3=await enrichKrwPrices(results.slice(0,3),{fetchImpl});
+  const safeResults=await filterUnsafeCandidates(results,{fetchImpl,env});
+  const top3=await enrichKrwPrices(safeResults.slice(0,3),{fetchImpl});
   try{await save({candidates:top3,env});}catch{}
   return top3.map(formatResult);
 }
@@ -40,4 +61,4 @@ if(require.main===module){
     .catch(error=>{console.error(`Pre-Pump scan failed: ${error?.message||"unknown error"}`);process.exitCode=1;});
 }
 
-module.exports={enrichKrwPrices,formatResult,runUpbitPrePump};
+module.exports={blockedMarketSet,enrichKrwPrices,filterUnsafeCandidates,formatResult,runUpbitPrePump};
