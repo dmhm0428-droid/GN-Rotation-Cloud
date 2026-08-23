@@ -1,5 +1,6 @@
 const SPOT_BASE = "https://data-api.binance.vision";
 const FUTURES_BASE = "https://fapi.binance.com";
+const BYBIT_BASE = "https://api.bybit.com";
 
 const STABLE_BASE = new Set(["USDT","USDC","FDUSD","TUSD","USDP","DAI","BUSD","EUR","AEUR","TRY","BRL"]);
 const LEVERAGED_SUFFIX = /(UP|DOWN|BULL|BEAR)$/;
@@ -14,7 +15,7 @@ async function fetchJson(url, opts={}){
   const ac=new AbortController();
   const timer=setTimeout(()=>ac.abort(),10000);
   try{
-    const r=await fetch(url,{...opts,signal:ac.signal,headers:{"User-Agent":"GN-Rotation-Market-v5","accept":"application/json",...(opts.headers||{})}});
+    const r=await fetch(url,{...opts,signal:ac.signal,headers:{"User-Agent":"GN-Rotation-Market-v6","accept":"application/json",...(opts.headers||{})}});
     if(!r.ok)throw new Error(`${r.status} ${r.statusText}`);
     return await r.json();
   } finally { clearTimeout(timer); }
@@ -32,6 +33,12 @@ function validUsdtSymbol(symbol){
   if(STABLE_BASE.has(base))return false;
   if(LEVERAGED_SUFFIX.test(base))return false;
   return true;
+}
+function bybitList(payload,label){
+  if(payload?.retCode!==0)throw new Error(`${label} retCode ${payload?.retCode}: ${payload?.retMsg||"unknown"}`);
+  const rows=payload?.result?.list;
+  if(!Array.isArray(rows))throw new Error(`${label} empty`);
+  return rows;
 }
 
 async function spotBreadth(){
@@ -64,24 +71,79 @@ async function spotBreadth(){
   };
 }
 
-async function fundingBreadth(){
+async function fundingBreadthBinance(){
   const rows=await retry(()=>fetchJson(`${FUTURES_BASE}/fapi/v1/premiumIndex`));
   const parsed=(rows||[]).filter(x=>validUsdtSymbol(x.symbol)).map(x=>(+x.lastFundingRate)).filter(Number.isFinite);
-  if(!parsed.length)throw new Error("futures funding empty");
+  if(!parsed.length)throw new Error("binance futures funding empty");
   return {
     count:parsed.length,
     positive:parsed.filter(x=>x>0).length/parsed.length,
     median:median(parsed),
     hot:parsed.filter(x=>Math.abs(x)>=0.0005).length/parsed.length,
-    veryHot:parsed.filter(x=>Math.abs(x)>=0.001).length/parsed.length
+    veryHot:parsed.filter(x=>Math.abs(x)>=0.001).length/parsed.length,
+    source:"binance"
   };
 }
 
-async function takerRatio(symbol="BTCUSDT"){
+async function fundingBreadthBybit(){
+  const payload=await retry(()=>fetchJson(`${BYBIT_BASE}/v5/market/tickers?category=linear`));
+  const rows=bybitList(payload,"bybit tickers");
+  const parsed=rows.filter(x=>validUsdtSymbol(x.symbol)).map(x=>+x.fundingRate).filter(Number.isFinite);
+  if(!parsed.length)throw new Error("bybit futures funding empty");
+  return {
+    count:parsed.length,
+    positive:parsed.filter(x=>x>0).length/parsed.length,
+    median:median(parsed),
+    hot:parsed.filter(x=>Math.abs(x)>=0.0005).length/parsed.length,
+    veryHot:parsed.filter(x=>Math.abs(x)>=0.001).length/parsed.length,
+    source:"bybit"
+  };
+}
+
+async function fundingBreadth(){
+  try{return await fundingBreadthBinance();}
+  catch{return fundingBreadthBybit();}
+}
+
+async function takerRatioBinance(symbol="BTCUSDT"){
   const rows=await retry(()=>fetchJson(`${FUTURES_BASE}/futures/data/takerlongshortRatio?symbol=${symbol}&period=5m&limit=12`));
-  if(!Array.isArray(rows)||!rows.length)throw new Error("taker ratio empty");
+  if(!Array.isArray(rows)||!rows.length)throw new Error("binance taker ratio empty");
   const recent=rows.slice(-3).map(x=>+x.buySellRatio).filter(Number.isFinite);
-  return {current:+rows.at(-1).buySellRatio,avg15m:recent.reduce((a,b)=>a+b,0)/(recent.length||1)};
+  return {current:+rows.at(-1).buySellRatio,avg15m:recent.reduce((a,b)=>a+b,0)/(recent.length||1),source:"binance"};
+}
+
+async function takerRatioBybit(symbol="BTCUSDT"){
+  const payload=await retry(()=>fetchJson(`${BYBIT_BASE}/v5/market/recent-trade?category=linear&symbol=${encodeURIComponent(symbol)}&limit=1000`));
+  const rows=bybitList(payload,"bybit recent trades");
+  if(!rows.length)throw new Error("bybit recent trades empty");
+  const now=Date.now(), cutoff=now-15*60*1000;
+  let buy=0,sell=0,used=0;
+  for(const r of rows){
+    const t=Number(r.time),size=Number(r.size),price=Number(r.price);
+    if(!Number.isFinite(t)||!Number.isFinite(size)||!Number.isFinite(price)||t<cutoff)continue;
+    const notional=size*price;
+    if(r.side==="Buy")buy+=notional;
+    else if(r.side==="Sell")sell+=notional;
+    used++;
+  }
+  if(!used){
+    for(const r of rows.slice(0,200)){
+      const size=Number(r.size),price=Number(r.price);
+      if(!Number.isFinite(size)||!Number.isFinite(price))continue;
+      const notional=size*price;
+      if(r.side==="Buy")buy+=notional;
+      else if(r.side==="Sell")sell+=notional;
+      used++;
+    }
+  }
+  if(!used||sell<=0)throw new Error("bybit taker ratio insufficient trades");
+  const ratio=buy/sell;
+  return {current:ratio,avg15m:ratio,source:"bybit",tradeCount:used};
+}
+
+async function takerRatio(symbol="BTCUSDT"){
+  try{return await takerRatioBinance(symbol);}
+  catch{return takerRatioBybit(symbol);}
 }
 
 function scoreMarket({spot,funding,taker,btc,macroScore=5}){
