@@ -1,6 +1,8 @@
 const express=require("express");
 const {createClient}=require("@supabase/supabase-js");
 const {collectLiveMarket}=require("./market");
+const {createDeepSeekTestHandler}=require("./ai/deepseek-admin");
+const {createLatestPrePumpHandler}=require("./pre-pump-dashboard");
 const app=express();
 
 const URL=process.env.SUPABASE_URL, KEY=process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -30,6 +32,7 @@ app.get("/api/market/latest",async(req,res)=>{
   const {data,error}=await db.from("gn_market_snapshots").select("*").order("ts",{ascending:false}).limit(1).maybeSingle();
   if(error)return res.status(500).json({error:error.message}); res.json(data||null);
 });
+app.post("/api/admin/ai-test/deepseek",createDeepSeekTestHandler({db,env:process.env}));
 let liveCache={at:0,data:null};
 app.get("/api/market/live",async(req,res)=>{
   try{
@@ -48,6 +51,7 @@ app.get("/api/runs",async(req,res)=>{
   const {data,error}=await db.from("gn_runs").select("*").order("started_at",{ascending:false}).limit(30);
   if(error)return res.status(500).json({error:error.message}); res.json(data);
 });
+app.get("/api/pre-pump/latest",createLatestPrePumpHandler({db}));
 
 app.get("/",(req,res)=>res.type("html").send(`<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -66,6 +70,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:8px;borde
 <div class="hero" id="hero"><div class="muted">시장 판단 계산 중…</div></div>
 <h2>시장 폭 · 파생시장</h2><div class="grid" id="marketMetrics"></div>
 <h2>회전 후보</h2><div class="grid" id="cards"></div>
+<h2>Pre-Pump TOP3</h2><div class="card" id="prePump"><div class="muted">불러오는 중…</div></div>
 <h2>상승/하락 주도</h2><div class="card" id="movers"></div>
 <h2>최근 신호</h2><div class="card"><table><thead><tr><th>시간</th><th>코인</th><th>단계</th><th>내용</th></tr></thead><tbody id="alerts"></tbody></table></div>
 </div><script>
@@ -91,10 +96,16 @@ function metrics(m){const s=m?.spot,f=m?.funding,b=m?.btcTaker,e=m?.ethTaker;ret
 ].map(x=>'<div class="card"><div class="muted">'+x[0]+'</div><div class="score">'+x[1]+'</div><div class="muted">'+x[2]+'</div></div>').join('');}
 function movers(m){const s=m?.spot;if(!s)return 'N/A';const one=(x,good)=>'<span class="pill '+(good?'good':'bad')+'">'+x.symbol+' '+(x.change>=0?'+':'')+x.change.toFixed(1)+'%</span>';return '<div class="muted">상승 주도</div>'+s.leaders.map(x=>one(x,true)).join('')+'<div class="muted" style="margin-top:12px">하락 주도</div>'+s.laggards.map(x=>one(x,false)).join('');}
 function coinCards(latest){return (latest||[]).map(r=>'<div class="card"><div class="muted">'+(r.rank||'-')+'위 · 데이터품질 '+Math.round((r.data_quality||0)*100)+'%</div><div class="coin">'+r.coin+'</div><div class="score">'+Number(r.score).toFixed(2)+'</div><div class="'+((r.stage==='본회전'||r.stage==='선발대')?'good':r.stage==='과열'?'bad':'warn')+'"><b>'+r.stage+'</b></div><div class="row"><span>원화</span><b>'+n(r.krw_price)+'</b></div><div class="row"><span>RS 4h / 24h</span><b>'+pct(r.rs4)+' / '+pct(r.rs24)+'</b></div><div class="row"><span>CVD15</span><b>'+pct(r.cvd15)+'</b></div><div class="row"><span>OI 15m / 1h</span><b>'+pct(r.oi15)+' / '+pct(r.oi1h)+'</b></div><div class="row"><span>Funding</span><b>'+pct(r.funding,3)+'</b></div></div>').join('');}
+function prePumpTable(rows){
+ if(!rows||!rows.length)return '<div class="muted">No scanner data yet</div>';
+ const stateClass=s=>s==='ENTRY'?'good':s==='NO_CHASE'?'bad':s==='SCOUT'?'blue':'warn';
+ return '<table><thead><tr><th>순위</th><th>마켓</th><th>점수</th><th>상태</th><th>5분</th><th>15분</th><th>거래대금</th><th>업데이트</th></tr></thead><tbody>'+rows.map(r=>'<tr><td>'+r.rank+'</td><td><b>'+r.market+'</b></td><td>'+Number(r.score).toFixed(2)+'</td><td class="'+stateClass(r.status)+'"><b>'+r.status+'</b></td><td>'+pct(r.return5m,2)+'</td><td>'+pct(r.return15m,2)+'</td><td>'+pct(r.volumeRatio15m,1)+'</td><td>'+new Date(r.updated_at).toLocaleString()+'</td></tr>').join('')+'</tbody></table>';
+}
 async function loadAll(){
  try{
-  const [market,latest,alerts]=await Promise.all([safe('/api/market/live'),safe('/api/latest'),safe('/api/alerts')]);
+  const [market,latest,alerts,prePump]=await Promise.all([safe('/api/market/live'),safe('/api/latest'),safe('/api/alerts'),safe('/api/pre-pump/latest').catch(()=>[])]);
   document.getElementById('hero').innerHTML=hero(market);document.getElementById('marketMetrics').innerHTML=metrics(market);document.getElementById('cards').innerHTML=coinCards(latest);document.getElementById('movers').innerHTML=movers(market);
+  document.getElementById('prePump').innerHTML=prePumpTable(prePump);
   document.getElementById('updated').textContent='실시간 시장 '+new Date(market.ts).toLocaleString()+' · 자동 갱신 60초';
   document.getElementById('alerts').innerHTML=(alerts||[]).slice(0,12).map(a=>'<tr><td>'+new Date(a.ts).toLocaleString()+'</td><td>'+a.coin+'</td><td>'+(a.stage||a.level)+'</td><td>'+a.message+'</td></tr>').join('');
  }catch(e){document.getElementById('updated').textContent='오류: '+e.message;}

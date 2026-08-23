@@ -1,0 +1,44 @@
+"use strict";
+
+class AiProviderError extends Error{
+  constructor(code,message){super(message);this.name="AiProviderError";this.code=code;}
+}
+function systemPrompt(){
+  return "Analyze the supplied GN market snapshot as read-only context. Never recommend or create orders. Return JSON only: {summary:string,sentiment:'risk_off'|'neutral'|'risk_on',confidence:number,signals:string[]}.";
+}
+function buildPayload(provider,input){
+  const payload={model:provider.model,messages:[{role:"system",content:systemPrompt()},{role:"user",content:JSON.stringify(input)}],max_tokens:provider.maxOutputTokens,stream:false};
+  if(provider.name==="deepseek")payload.thinking={type:"disabled"};
+  return payload;
+}
+function responseText(body){return body?.choices?.[0]?.message?.content;}
+function normalizeAnalysis(text){
+  let value;
+  try{value=JSON.parse(text);}catch{throw new AiProviderError("INVALID_RESPONSE","Provider response was not valid JSON");}
+  const sentiment=["risk_off","neutral","risk_on"].includes(value.sentiment)?value.sentiment:"neutral";
+  const confidence=Math.max(0,Math.min(1,Number(value.confidence)||0));
+  return {summary:String(value.summary||"").slice(0,1000),sentiment,confidence,signals:Array.isArray(value.signals)?value.signals.slice(0,10).map(x=>String(x).slice(0,300)):[]};
+}
+async function fetchTransport({endpoint,apiKey,payload,timeoutMs}){
+  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{
+    const response=await fetch(endpoint,{method:"POST",signal:controller.signal,headers:{"Authorization":`Bearer ${apiKey}`,"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(payload)});
+    const body=await response.json().catch(()=>null);
+    if(!response.ok)throw new AiProviderError(`HTTP_${response.status}`,`Provider returned HTTP ${response.status}`);
+    return {body,usage:body?.usage||{}};
+  }catch(error){if(error?.name==="AbortError")throw new AiProviderError("TIMEOUT","Provider request timed out");throw error;}
+  finally{clearTimeout(timer);}
+}
+async function invokeProvider(provider,input,transport=fetchTransport){
+  if(!provider.enabled)return {provider:provider.name,model:provider.model,status:"disabled"};
+  if(!provider.apiKey)throw new AiProviderError("MISSING_KEY",`${provider.name} API key is missing`);
+  if(provider.estimatedCostUsd>provider.maxCostUsd)throw new AiProviderError("COST_LIMIT",`${provider.name} request exceeds its cost limit`);
+  const result=await transport({endpoint:provider.endpoint,apiKey:provider.apiKey,payload:buildPayload(provider,input),timeoutMs:provider.timeoutMs});
+  return {provider:provider.name,model:provider.model,status:"success",...normalizeAnalysis(responseText(result.body)),usage:sanitizeUsage(result.usage),costUsd:provider.estimatedCostUsd};
+}
+function sanitizeUsage(usage){
+  const allowed=["prompt_tokens","completion_tokens","total_tokens","input_tokens","output_tokens"];
+  return Object.fromEntries(allowed.filter(k=>Number.isFinite(Number(usage?.[k]))).map(k=>[k,Number(usage[k])]));
+}
+
+module.exports={AiProviderError,buildPayload,fetchTransport,invokeProvider,normalizeAnalysis,sanitizeUsage};

@@ -7,8 +7,10 @@
     "node": ">=20"
   },
   "scripts": {
+    "ai:analyze": "node src/ai-runner.js",
     "collector": "node src/collector.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test --test-isolation=none"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

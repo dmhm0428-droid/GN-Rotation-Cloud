@@ -50,6 +50,25 @@ create index if not exists gn_snapshots_coin_ts_idx on public.gn_snapshots (coin
 create index if not exists gn_snapshots_ts_idx on public.gn_snapshots (ts desc);
 create index if not exists gn_runs_started_idx on public.gn_runs (started_at desc);
 
+-- Pre-Pump candidates cannot use gn_snapshots because its coin constraint is limited to BTC/ETH/SOL/LINK.
+-- Reuse gn_runs for each scan and keep only scanner-specific candidate fields here.
+create table if not exists public.gn_pre_pump_snapshots (
+  id bigserial primary key,
+  run_id uuid not null references public.gn_runs(id) on delete cascade,
+  ts timestamptz not null default now(),
+  market text not null check (market ~ '^KRW-[A-Z0-9]+$'),
+  rank integer not null check (rank between 1 and 3),
+  score numeric not null check (score between 0 and 100),
+  status text not null check (status in ('WAIT','SCOUT','ENTRY','NO_CHASE')),
+  return5m numeric,
+  return15m numeric,
+  volume_ratio15m numeric,
+  details jsonb not null default '{}'::jsonb
+);
+
+create index if not exists gn_pre_pump_snapshots_run_rank_idx on public.gn_pre_pump_snapshots (run_id, rank);
+create index if not exists gn_pre_pump_snapshots_ts_idx on public.gn_pre_pump_snapshots (ts desc);
+
 create table if not exists public.gn_overlays (
   id integer primary key check (id=1),
   etf jsonb not null default '{"BTC":5,"ETH":5,"SOL":5,"LINK":5}'::jsonb,
@@ -74,19 +93,48 @@ create table if not exists public.gn_alerts (
 
 create index if not exists gn_alerts_ts_idx on public.gn_alerts (ts desc);
 
+-- Read-only AI analysis results. Raw prompts/responses and API keys are never stored.
+create table if not exists public.gn_ai_analyses (
+  id bigserial primary key,
+  created_at timestamptz not null default now(),
+  source_snapshot_ts timestamptz,
+  provider text not null check (provider in ('perplexity','xai','deepseek')),
+  model text not null,
+  status text not null check (status in ('success','disabled','skipped','error')),
+  summary text,
+  sentiment text check (sentiment is null or sentiment in ('risk_off','neutral','risk_on')),
+  confidence numeric check (confidence is null or (confidence >= 0 and confidence <= 1)),
+  signals jsonb not null default '[]'::jsonb,
+  usage jsonb not null default '{}'::jsonb,
+  cost_usd numeric,
+  error_code text,
+  constraint ai_analysis_no_raw_fields check (
+    not (usage ?| array['prompt','request','response','raw','api_key'])
+  )
+);
+
+create index if not exists gn_ai_analyses_created_idx on public.gn_ai_analyses (created_at desc);
+create index if not exists gn_ai_analyses_provider_created_idx on public.gn_ai_analyses (provider, created_at desc);
+
 -- 브라우저에서 DB를 직접 공개하지 않는다.
 alter table public.gn_runs enable row level security;
 alter table public.gn_snapshots enable row level security;
 alter table public.gn_overlays enable row level security;
 alter table public.gn_alerts enable row level security;
+alter table public.gn_ai_analyses enable row level security;
+alter table public.gn_pre_pump_snapshots enable row level security;
 
 revoke all on public.gn_runs from anon, authenticated;
 revoke all on public.gn_snapshots from anon, authenticated;
 revoke all on public.gn_overlays from anon, authenticated;
 revoke all on public.gn_alerts from anon, authenticated;
+revoke all on public.gn_ai_analyses from anon, authenticated;
+revoke all on public.gn_pre_pump_snapshots from anon, authenticated;
 
 grant all on public.gn_runs to service_role;
 grant all on public.gn_snapshots to service_role;
 grant all on public.gn_overlays to service_role;
 grant all on public.gn_alerts to service_role;
+grant all on public.gn_ai_analyses to service_role;
+grant all on public.gn_pre_pump_snapshots to service_role;
 grant usage, select on all sequences in schema public to service_role;
