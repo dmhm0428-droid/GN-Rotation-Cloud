@@ -7,11 +7,29 @@ function systemPrompt(){
   return "Analyze the supplied GN market snapshot as read-only context. Never recommend or create orders. Return JSON only: {summary:string,sentiment:'risk_off'|'neutral'|'risk_on',confidence:number,signals:string[]}.";
 }
 function buildPayload(provider,input){
+  if(provider.kind==="anthropic"){
+    return {
+      model:provider.model,
+      max_tokens:provider.maxOutputTokens,
+      system:systemPrompt(),
+      messages:[{role:"user",content:JSON.stringify(input)}]
+    };
+  }
+  if(provider.kind==="gemini"){
+    return {
+      contents:[{role:"user",parts:[{text:`${systemPrompt()}\n\nGN snapshot:\n${JSON.stringify(input)}`}]}],
+      generationConfig:{maxOutputTokens:provider.maxOutputTokens,responseMimeType:"application/json"}
+    };
+  }
   const payload={model:provider.model,messages:[{role:"system",content:systemPrompt()},{role:"user",content:JSON.stringify(input)}],max_tokens:provider.maxOutputTokens,stream:false};
   if(provider.name==="deepseek")payload.thinking={type:"disabled"};
   return payload;
 }
-function responseText(body){return body?.choices?.[0]?.message?.content;}
+function responseText(provider,body){
+  if(provider.kind==="anthropic")return body?.content?.find(x=>x?.type==="text")?.text;
+  if(provider.kind==="gemini")return body?.candidates?.[0]?.content?.parts?.map(x=>x?.text||"").join("");
+  return body?.choices?.[0]?.message?.content;
+}
 function normalizeAnalysis(text){
   let value;
   try{value=JSON.parse(text);}catch{throw new AiProviderError("INVALID_RESPONSE","Provider response was not valid JSON");}
@@ -19,13 +37,22 @@ function normalizeAnalysis(text){
   const confidence=Math.max(0,Math.min(1,Number(value.confidence)||0));
   return {summary:String(value.summary||"").slice(0,1000),sentiment,confidence,signals:Array.isArray(value.signals)?value.signals.slice(0,10).map(x=>String(x).slice(0,300)):[]};
 }
-async function fetchTransport({endpoint,apiKey,payload,timeoutMs}){
+async function fetchTransport({provider,endpoint,apiKey,payload,timeoutMs}){
   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
-    const response=await fetch(endpoint,{method:"POST",signal:controller.signal,headers:{"Authorization":`Bearer ${apiKey}`,"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(payload)});
+    let url=endpoint;
+    let headers={"Content-Type":"application/json","Accept":"application/json"};
+    if(provider.kind==="anthropic"){
+      headers={...headers,"x-api-key":apiKey,"anthropic-version":"2023-06-01"};
+    }else if(provider.kind==="gemini"){
+      url=`${endpoint}/models/${encodeURIComponent(provider.model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    }else{
+      headers={...headers,"Authorization":`Bearer ${apiKey}`};
+    }
+    const response=await fetch(url,{method:"POST",signal:controller.signal,headers,body:JSON.stringify(payload)});
     const body=await response.json().catch(()=>null);
     if(!response.ok)throw new AiProviderError(`HTTP_${response.status}`,`Provider returned HTTP ${response.status}`);
-    return {body,usage:body?.usage||{}};
+    return {body,usage:body?.usage||body?.usageMetadata||{}};
   }catch(error){if(error?.name==="AbortError")throw new AiProviderError("TIMEOUT","Provider request timed out");throw error;}
   finally{clearTimeout(timer);}
 }
@@ -33,12 +60,18 @@ async function invokeProvider(provider,input,transport=fetchTransport){
   if(!provider.enabled)return {provider:provider.name,model:provider.model,status:"disabled"};
   if(!provider.apiKey)throw new AiProviderError("MISSING_KEY",`${provider.name} API key is missing`);
   if(provider.estimatedCostUsd>provider.maxCostUsd)throw new AiProviderError("COST_LIMIT",`${provider.name} request exceeds its cost limit`);
-  const result=await transport({endpoint:provider.endpoint,apiKey:provider.apiKey,payload:buildPayload(provider,input),timeoutMs:provider.timeoutMs});
-  return {provider:provider.name,model:provider.model,status:"success",...normalizeAnalysis(responseText(result.body)),usage:sanitizeUsage(result.usage),costUsd:provider.estimatedCostUsd};
+  const payload=buildPayload(provider,input);
+  const result=await transport({provider,endpoint:provider.endpoint,apiKey:provider.apiKey,payload,timeoutMs:provider.timeoutMs});
+  return {provider:provider.name,model:provider.model,status:"success",...normalizeAnalysis(responseText(provider,result.body)),usage:sanitizeUsage(result.usage),costUsd:provider.estimatedCostUsd};
 }
 function sanitizeUsage(usage){
-  const allowed=["prompt_tokens","completion_tokens","total_tokens","input_tokens","output_tokens"];
-  return Object.fromEntries(allowed.filter(k=>Number.isFinite(Number(usage?.[k]))).map(k=>[k,Number(usage[k])]));
+  const aliases={prompt_tokens:["prompt_tokens","promptTokenCount","input_tokens"],completion_tokens:["completion_tokens","candidatesTokenCount","output_tokens"],total_tokens:["total_tokens","totalTokenCount"]};
+  const out={};
+  for(const [key,names] of Object.entries(aliases)){
+    const found=names.map(n=>usage?.[n]).find(v=>Number.isFinite(Number(v)));
+    if(found!=null)out[key]=Number(found);
+  }
+  return out;
 }
 
 module.exports={AiProviderError,buildPayload,fetchTransport,invokeProvider,normalizeAnalysis,sanitizeUsage};
