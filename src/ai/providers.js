@@ -67,9 +67,21 @@ async function invokeProvider(provider,input,transport=fetchTransport){
   if(!provider.enabled)return {provider:provider.name,model:provider.model,status:"disabled"};
   if(!provider.apiKey)throw new AiProviderError("MISSING_KEY",`${provider.name} API key is missing`);
   if(provider.estimatedCostUsd>provider.maxCostUsd)throw new AiProviderError("COST_LIMIT",`${provider.name} request exceeds its cost limit`);
-  const payload=buildPayload(provider,input);
-  const result=await transport({provider,endpoint:provider.endpoint,apiKey:provider.apiKey,payload,timeoutMs:provider.timeoutMs});
-  return {provider:provider.name,model:provider.model,status:"success",...normalizeAnalysis(responseText(provider,result.body)),usage:sanitizeUsage(result.usage),costUsd:provider.estimatedCostUsd};
+  const run=async p=>{
+    const payload=buildPayload(p,input);
+    const result=await transport({provider:p,endpoint:p.endpoint,apiKey:p.apiKey,payload,timeoutMs:p.timeoutMs});
+    return {provider:p.name,model:p.model,status:"success",...normalizeAnalysis(responseText(p,result.body)),usage:sanitizeUsage(result.usage),costUsd:p.estimatedCostUsd};
+  };
+  try{return await run(provider);}
+  catch(error){
+    if(provider.kind==="anthropic" && /INVALID_REQUEST|HTTP_400/.test(error?.code||"")){
+      return run({...provider,model:"claude-sonnet-5"});
+    }
+    if(provider.kind==="gemini" && /NOT_FOUND|HTTP_404/.test(error?.code||"")){
+      return run({...provider,model:"gemini-3.7-flash"});
+    }
+    throw error;
+  }
 }
 function sanitizeUsage(usage){
   const aliases={prompt_tokens:["prompt_tokens","promptTokenCount","input_tokens","inputTokens"],completion_tokens:["completion_tokens","candidatesTokenCount","output_tokens","outputTokens"],total_tokens:["total_tokens","totalTokenCount"]};
