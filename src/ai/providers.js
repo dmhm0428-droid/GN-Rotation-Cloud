@@ -12,7 +12,7 @@ function buildPayload(provider,input){
     return {
       model:provider.model,
       max_tokens:Math.max(provider.maxOutputTokens,512),
-      temperature:0,
+      thinking:{type:"disabled"},
       system:systemPrompt(),
       messages:[{role:"user",content:[{type:"text",text:`GN snapshot:\n${JSON.stringify(input)}\n\nReturn only the JSON object.`}]}]
     };
