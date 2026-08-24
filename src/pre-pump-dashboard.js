@@ -53,6 +53,7 @@ function formatCandidate(row,x={}){
   const context=row.details?.market_context||null;
   const daily=row.details?.daily_ignition||null;
   const orderbook=orderbookOf(row);
+  const listing=row.details?.new_listing||null;
   return {
     rank:x.rank,
     market:row.market,
@@ -75,6 +76,18 @@ function formatCandidate(row,x={}){
     ageMinutes:0,
     reason:row.details?.confirmation?.reason||row.details?.market_block||null,
     latePump:row.details?.late_pump||null,
+    newListing:listing?{
+      isNew:listing.is_new===true,
+      ageDays:listing.age_days??null,
+      overseasAvailable:listing.overseas_available===true,
+      source:listing.source??null,
+      overseasListingUsd:listing.overseas_listing_usd??null,
+      overseasCurrentUsd:listing.overseas_current_usd??null,
+      overseasReturnPct:num(listing.return_from_overseas_listing)==null?null:+(Number(listing.return_from_overseas_listing)*100).toFixed(1),
+      upbitPremiumPct:num(listing.upbit_premium_vs_overseas)==null?null:+(Number(listing.upbit_premium_vs_overseas)*100).toFixed(1),
+      scoreDelta:listing.score_delta??0,
+      reasons:listing.reasons||[]
+    }:null,
     orderbook:orderbook?{available:orderbook.available===true,signal:orderbook.signal||"UNKNOWN",entryBlocked:orderbook.entry_blocked===true}:null,
     dailyIgnition:daily?{score:daily.score,stage:daily.stage,available:daily.available,reasons:daily.reasons||[]}:null,
     marketContext:context?{marketScore:context.marketScore,gateScore:context.gateScore,regime:context.regime,breadth:context.breadth,policyScore:context.policyScore,aiBias:context.aiBias,warOverride:context.warOverride}:null,
