@@ -107,20 +107,47 @@ function analyzeOrderbookPair(firstBook,secondBook){
   };
 }
 
+function individualRiskGuard(row,analysis={}){
+  let penalty=0;
+  const reasons=[];
+  let noChase=false;
+  const return15m=Number(row?.return15m),return3d=Number(row?.return3d),rsi=Number(row?.rsi14);
+  if(row?.latePumpRisk===true){penalty+=12;noChase=true;reasons.push("LATE_PUMP");}
+  if(row?.distributionRisk===true){penalty+=15;noChase=true;reasons.push("DISTRIBUTION");}
+  if(row?.heavyOldSellWall===true){penalty+=10;noChase=true;reasons.push("OLD_SELL_WALL");}
+  if(Number.isFinite(return15m)&&return15m>=.07){penalty+=10;noChase=true;reasons.push("15M_EXTENDED");}
+  else if(Number.isFinite(return15m)&&return15m>=.05){penalty+=5;reasons.push("15M_HOT");}
+  if(Number.isFinite(return3d)&&return3d>=.20){penalty+=12;noChase=true;reasons.push("3D_EXTENDED");}
+  else if(Number.isFinite(return3d)&&return3d>=.10){penalty+=6;reasons.push("3D_HOT");}
+  if(Number.isFinite(rsi)&&rsi>=75){penalty+=10;noChase=true;reasons.push("RSI_OVERHEATED");}
+  else if(Number.isFinite(rsi)&&rsi>=68){penalty+=5;reasons.push("RSI_HOT");}
+  if(analysis?.signal==="SELL_PRESSURE"){penalty+=10;reasons.push("SELL_PRESSURE");}
+  else if(analysis?.signal==="ASK_WALL"){penalty+=6;reasons.push("ASK_WALL");}
+  const entryBlocked=noChase||analysis?.entryBlocked===true||reasons.length>=3;
+  const scoreCap=noChase?64:entryBlocked?69:100;
+  return {penalty,entryBlocked,noChase,scoreCap,reasons};
+}
+
 async function enrichOrderbookSignals(rows,{fetchImpl=fetch,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),sampleDelayMs=ORDERBOOK_SAMPLE_DELAY_MS}={}){
   if(!rows.length)return rows;
   const markets=rows.map(row=>row.market).filter(Boolean);
   const first=await fetchOrderbooks(markets,{fetchImpl});
-  if(!first.size)return rows.map(row=>({...row,orderbookSignal:"UNKNOWN",orderbookAvailable:false}));
+  if(!first.size)return rows.map(row=>{
+    const guard=individualRiskGuard(row,{}),baseScore=Number(row.score)||0,adjustedScore=Math.max(0,Math.min(guard.scoreCap,baseScore-guard.penalty));
+    let state=row.state;if(guard.noChase)state="NO_CHASE";else if(guard.entryBlocked&&state==="ENTRY")state="CONFIRM_WAIT";
+    return {...row,score:+adjustedScore.toFixed(2),state,orderbookSignal:"UNKNOWN",orderbookAvailable:false,individualRiskBlocked:guard.entryBlocked,individualRiskPenalty:guard.penalty,individualRiskReasons:guard.reasons};
+  });
   await sleep(sampleDelayMs);
   const second=await fetchOrderbooks(markets,{fetchImpl});
   return rows.map(row=>{
     const analysis=analyzeOrderbookPair(first.get(row.market),second.get(row.market));
-    if(!analysis.available)return {...row,orderbookSignal:"UNKNOWN",orderbookAvailable:false};
-    const baseScore=Number(row.score)||0,adjustedScore=Math.max(0,Math.min(100,baseScore+analysis.scoreDelta));
+    const guard=individualRiskGuard(row,analysis);
+    const baseScore=Number(row.score)||0,orderbookDelta=analysis.available?analysis.scoreDelta:0,adjustedScore=Math.max(0,Math.min(guard.scoreCap,baseScore+orderbookDelta-guard.penalty));
     let state=row.state;
-    if(analysis.entryBlocked&&state==="ENTRY")state="CONFIRM_WAIT";
-    return {...row,score:+adjustedScore.toFixed(2),state,orderbookAvailable:true,orderbookSignal:analysis.signal,orderbookScoreDelta:analysis.scoreDelta,orderbookEntryBlocked:analysis.entryBlocked,orderbookBidImbalance:analysis.bidImbalance,orderbookAskWallRatio:analysis.askWallRatio,orderbookBidWallRatio:analysis.bidWallRatio,orderbookAskWallDepletion:analysis.askWallDepletion,orderbookBestBidHeld:analysis.bestBidHeld,orderbookBestAskLifted:analysis.bestAskLifted,orderbookBidDepthHeld:analysis.bidDepthHeld,orderbookAskDepthFalling:analysis.askDepthFalling,orderbookBestBid:analysis.bestBid,orderbookBestAsk:analysis.bestAsk,orderbookAskWallPrice:analysis.askWallPrice,orderbookBidWallPrice:analysis.bidWallPrice};
+    if(guard.noChase)state="NO_CHASE";
+    else if(guard.entryBlocked&&state==="ENTRY")state="CONFIRM_WAIT";
+    if(!analysis.available)return {...row,score:+adjustedScore.toFixed(2),state,orderbookSignal:"UNKNOWN",orderbookAvailable:false,individualRiskBlocked:guard.entryBlocked,individualRiskPenalty:guard.penalty,individualRiskReasons:guard.reasons};
+    return {...row,score:+adjustedScore.toFixed(2),state,orderbookAvailable:true,orderbookSignal:analysis.signal,orderbookScoreDelta:analysis.scoreDelta,orderbookEntryBlocked:analysis.entryBlocked,orderbookBidImbalance:analysis.bidImbalance,orderbookAskWallRatio:analysis.askWallRatio,orderbookBidWallRatio:analysis.bidWallRatio,orderbookAskWallDepletion:analysis.askWallDepletion,orderbookBestBidHeld:analysis.bestBidHeld,orderbookBestAskLifted:analysis.bestAskLifted,orderbookBidDepthHeld:analysis.bidDepthHeld,orderbookAskDepthFalling:analysis.askDepthFalling,orderbookBestBid:analysis.bestBid,orderbookBestAsk:analysis.bestAsk,orderbookAskWallPrice:analysis.askWallPrice,orderbookBidWallPrice:analysis.bidWallPrice,individualRiskBlocked:guard.entryBlocked,individualRiskPenalty:guard.penalty,individualRiskReasons:guard.reasons};
   }).sort((a,b)=>(Number(b.score)||0)-(Number(a.score)||0));
 }
 
@@ -135,7 +162,10 @@ function formatResult(row){
     turnoverGrowth15m:row.turnoverGrowth15m,
     orderbookSignal:row.orderbookSignal??"UNKNOWN",
     orderbookBidImbalance:row.orderbookBidImbalance??null,
-    orderbookAskWallDepletion:row.orderbookAskWallDepletion??null
+    orderbookAskWallDepletion:row.orderbookAskWallDepletion??null,
+    individualRiskBlocked:row.individualRiskBlocked??false,
+    individualRiskPenalty:row.individualRiskPenalty??0,
+    individualRiskReasons:row.individualRiskReasons??[]
   };
 }
 
@@ -154,4 +184,4 @@ if(require.main===module){
     .catch(error=>{console.error(`Pre-Pump scan failed: ${error?.message||"unknown error"}`);process.exitCode=1;});
 }
 
-module.exports={analyzeOrderbookPair,blockedMarketSet,enrichKrwPrices,enrichOrderbookSignals,fetchOrderbooks,filterUnsafeCandidates,formatResult,runUpbitPrePump,summarizeOrderbook};
+module.exports={analyzeOrderbookPair,blockedMarketSet,enrichKrwPrices,enrichOrderbookSignals,fetchOrderbooks,filterUnsafeCandidates,formatResult,individualRiskGuard,runUpbitPrePump,summarizeOrderbook};
