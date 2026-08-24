@@ -35,6 +35,21 @@ function snapshotRows(candidates,runId,timestamp){
       obv:{direction:candidate.obvDirection??null},
       structure:{higher_low_15m:candidate.higherLow15m??null,resistance_proximity_15m:candidate.resistanceProximity15m??null,structure_1h:candidate.structure1h??null},
       derivatives:{score:candidate.derivativeScore??50,data_available:candidate.derivativeDataAvailable??false},
+      new_listing:{
+        is_new:candidate.newListing??false,
+        age_days:candidate.newListingAgeDays??null,
+        history_days:candidate.newListingHistoryDays??null,
+        overseas_available:candidate.overseasAvailable??false,
+        source:candidate.overseasSource??null,
+        overseas_listing_usd:candidate.overseasListingUsd??null,
+        overseas_current_usd:candidate.overseasCurrentUsd??null,
+        overseas_listing_time:candidate.overseasListingTime??null,
+        return_from_overseas_listing:candidate.overseasReturnFromListing??null,
+        upbit_premium_vs_overseas:candidate.upbitPremiumVsOverseas??null,
+        usdt_krw:candidate.overseasUsdtKrw??null,
+        score_delta:candidate.overseasScoreDelta??0,
+        reasons:candidate.overseasReasons||[]
+      },
       orderbook:{
         available:candidate.orderbookAvailable??false,
         signal:candidate.orderbookSignal??"UNKNOWN",
