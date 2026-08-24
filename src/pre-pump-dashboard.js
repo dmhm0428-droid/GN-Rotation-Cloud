@@ -1,38 +1,120 @@
 "use strict";
-const TOP3_MIN_SCORE=58,TOP3_MAX_RETURN_5M=.035,TOP3_MAX_RETURN_15M=.06,TOP3_MIN_DAILY_IGNITION=45,TRACK_LIMIT=180,TRACK_HOURS=8;
+
+const TOP3_MIN_SCORE=58;
+const TOP3_MAX_SCORE=82;
+const TOP3_MAX_RETURN_5M=.035;
+const TOP3_MAX_RETURN_15M=.06;
+const TOP3_MIN_DAILY_IGNITION=45;
 const TOP3_STATUSES=new Set(["SCOUT","ENTRY","CONFIRM_WAIT"]);
+
 const num=v=>{const n=Number(v);return Number.isFinite(n)?n:null;};
-const minutesBetween=(a,b)=>{const x=new Date(a).getTime(),y=new Date(b).getTime();return Number.isFinite(x)&&Number.isFinite(y)?Math.max(0,(x-y)/60000):null;};
 const isLatePump=d=>{const x=d?.late_pump;return !!x&&(x.latePumpRisk===true||x.risk===true||x.blocked===true||x.no_chase===true);};
 const marketScoreOf=r=>num(r?.details?.market_context?.marketScore);
 const orderbookOf=r=>r?.details?.orderbook||null;
 const signed=(v,d=1)=>{const n=num(v);return n==null?"?":`${n>=0?"+":""}${n.toFixed(d)}`;};
-function formatDashboardStatus(x){const a=x.action||"관찰",m=x.marketScore==null?"시장?":`시장${Number(x.marketScore).toFixed(0)}`,md=x.marketDelta==null?"":`(${signed(x.marketDelta,0)})`,g=x.gain==null?"":` · 추천가${signed(x.gain,1)}%`,p=x.pumpDelta==null?"":` · 펌프Δ${signed(x.pumpDelta,1)}`,o=x.orderbookSignal&&x.orderbookSignal!=="UNKNOWN"?` · 호가 ${x.orderbookSignal}`:"";return `${a} · ${m}${md}${g}${p}${o}`;}
-function isDisplayableTopCandidate(r){if(!r||Number(r.rank)>=100||!TOP3_STATUSES.has(String(r.status||"").toUpperCase()))return false;const s=num(r.score),r5=num(r.return5m),r15=num(r.return15m);if(s==null||s<TOP3_MIN_SCORE||r5==null||r5<=0||r5>TOP3_MAX_RETURN_5M||r15==null||r15<=0||r15>TOP3_MAX_RETURN_15M)return false;const d=r.details?.daily_ignition;if(d?.available===true&&Number(d.score)<TOP3_MIN_DAILY_IGNITION)return false;if(r.details?.market_block||r.details?.market_context?.warOverride===true||isLatePump(r.details))return false;return true;}
-const priceChangePct=(a,b)=>{a=num(a);b=num(b);return a&&b?((b/a)-1)*100:null;};
-function classifyAction({row,previous,firstSignal,peakScore,marketScore,marketDelta,inLatest,latestTs}){
-  const score=num(row?.score)??0,previousScore=num(previous?.score),pumpDelta=previousScore==null?null:score-previousScore,status=String(row?.status||"").toUpperCase(),r15=num(row?.return15m)??0,gain=priceChangePct(firstSignal?.krw_price,row?.krw_price),ageMinutes=minutesBetween(latestTs,row?.ts),disappeared=!inLatest&&ageMinutes!=null&&ageMinutes>=20,late=isLatePump(row?.details)||status==="NO_CHASE",marketUp=(marketDelta??0)>=2,marketStable=(marketDelta??0)>=-2,pumpFalling=(pumpDelta??0)<=-8,pumpStrong=(pumpDelta??0)>=3,pumpStalled=(pumpDelta??0)<=1,peakDrop=(num(peakScore)??score)-score,sameSignal=!!firstSignal&&String(firstSignal.ts)===String(row?.ts),orderbook=orderbookOf(row),orderbookSignal=String(orderbook?.signal||"UNKNOWN"),orderbookBlocked=orderbook?.entry_blocked===true||status==="CONFIRM_WAIT"||orderbookSignal==="SELL_PRESSURE"||orderbookSignal==="ASK_WALL",orderbookSupport=["SELL_ABSORPTION","WALL_BREAK","BID_DEFENSE"].includes(orderbookSignal);
-  if(firstSignal&&((disappeared&&peakDrop>=20)||(marketScore!=null&&marketScore<50&&peakDrop>=15&&gain!=null&&gain<0)||(late&&gain!=null&&gain>=5&&pumpFalling)))return {action:"매도",tone:"bad",reason:"추천 후 추세 훼손 확인 · 보유 지속보다 정리 우선",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(firstSignal&&orderbookSignal==="SELL_PRESSURE"&&(pumpFalling||peakDrop>=8))return {action:"매도준비",tone:"warn",reason:"실시간 호가 매도압력 증가 + 펌프 강도 약화",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(late)return {action:firstSignal?"매도준비":"추격금지",tone:"bad",reason:firstSignal?"과열/NO_CHASE 전환 · 익절 준비":"과열 구간 · 신규진입 금지",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(firstSignal&&marketUp&&(pumpFalling||peakDrop>=15))return {action:"매도준비",tone:"warn",reason:"시장점수는 개선되는데 종목 펌프점수 약화",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(firstSignal&&disappeared&&marketUp&&pumpStalled)return {action:"매도준비",tone:"warn",reason:"시장 강세인데 재추천이 끊겨 상대강도 둔화",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(firstSignal&&gain!=null&&gain>=8)return {action:"매도준비",tone:"warn",reason:"추천가 대비 +8% 이상 · 익절매물 경계",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(firstSignal&&disappeared)return {action:"보유점검",tone:"warn",reason:"TOP3 이탈 · 다음 스캔까지 가격/점수 재확인",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(inLatest&&orderbookBlocked&&!firstSignal)return {action:"진입대기",tone:"warn",reason:orderbookSignal==="ASK_WALL"?"상단 매도벽 미소진 · 벽 감소/돌파 확인 대기":"실시간 매도압력 우세 · 매수벽 유지 확인 대기",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(firstSignal&&inLatest&&orderbookBlocked)return {action:"보유점검",tone:"warn",reason:"호가 매도압력/매도벽 확인 · 추가진입 금지",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(inLatest&&sameSignal&&marketScore!=null&&marketScore>=55&&marketScore<=69&&score>=68&&score<=82&&r15<=.03&&(gain==null||gain<=3))return {action:"진입",tone:"good",reason:orderbookSupport?"시장 회복 + 펌프 강도 + 호가 흡수/매수방어 확인":"시장 회복 + 펌프 강도 확인 + 가격 과열 전",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(firstSignal&&!sameSignal&&inLatest&&marketScore!=null&&marketScore>=60&&marketScore<=75&&marketStable&&score>=72&&score<=84&&pumpStrong&&gain!=null&&gain>=0&&gain<=3&&r15<=.03)return {action:"추가진입",tone:"good",reason:orderbookSupport?"시장 유지 + 펌프 재가속 + 호가 흡수 확인":"시장 유지 + 펌프 재가속 + 추천가 대비 +3% 이내",pumpDelta,gain,ageMinutes,orderbookSignal};
-  if(firstSignal&&!sameSignal&&inLatest&&score>=68&&marketScore!=null&&marketScore>=55){if(gain!=null&&gain>=5)return {action:"보유",tone:"blue",reason:"강도는 유지되나 신규/추가 진입은 늦음",pumpDelta,gain,ageMinutes,orderbookSignal};return {action:"보유",tone:"blue",reason:orderbookSupport?"시장·종목 강도 유지 + 호가 지지 확인":"시장·종목 강도 유지 · 기존 포지션 유지",pumpDelta,gain,ageMinutes,orderbookSignal};}
-  if(!firstSignal&&inLatest&&score>=70&&marketScore!=null&&marketScore>=60)return {action:"진입대기",tone:"blue",reason:orderbookSupport?"호가 흡수는 확인 · 최초 진입 조건 한 번 더 확인":"강도는 확인됐지만 최초 진입 조건 재확인 필요",pumpDelta,gain,ageMinutes,orderbookSignal};
-  return {action:firstSignal?"보유점검":"진입대기",tone:"muted",reason:firstSignal?"추천 이력 유지 · 다음 스캔 확인":"조건 일부 미충족",pumpDelta,gain,ageMinutes,orderbookSignal};
+
+function formatDashboardStatus(x){
+  const a=x.action||"관찰";
+  const m=x.marketScore==null?"시장?":`시장${Number(x.marketScore).toFixed(0)}`;
+  const md=x.marketDelta==null?"":`(${signed(x.marketDelta,0)})`;
+  const p=x.pumpDelta==null?"":` · 펌프Δ${signed(x.pumpDelta,1)}`;
+  const o=x.orderbookSignal&&x.orderbookSignal!=="UNKNOWN"?` · 호가 ${x.orderbookSignal}`:"";
+  return `${a} · ${m}${md}${p}${o}`;
 }
-function formatCandidate(row,x={}){const context=row.details?.market_context||null,sizing=row.details?.shannon_thorp||null,daily=row.details?.daily_ignition||null,orderbook=orderbookOf(row),holding=Number(row.rank)>=100||["HOLD","REDUCE","EXIT"].includes(row.status);return {rank:x.rank??(holding?"보유":row.rank),market:row.market,score:row.score,scannerStatus:row.status,status:formatDashboardStatus({...x,orderbookSignal:x.orderbookSignal||orderbook?.signal}),action:x.action||null,actionTone:x.tone||null,actionReason:x.reason||null,holding,inLatest:x.inLatest??true,return5m:row.return5m,return15m:row.return15m,volumeRatio15m:row.volume_ratio15m,krwPrice:row.krw_price??null,signalPrice:x.firstSignal?.krw_price??null,signalScore:x.firstSignal?.score??null,peakScore:x.peakScore??row.score,pumpDelta:x.pumpDelta??null,marketScore:x.marketScore??marketScoreOf(row),marketDelta:x.marketDelta??null,gainFromSignalPct:x.gain??null,ageMinutes:x.ageMinutes??null,reason:row.details?.holding_reason||row.details?.confirmation?.reason||row.details?.market_block||null,latePump:row.details?.late_pump||null,orderbook:orderbook?{available:orderbook.available===true,signal:orderbook.signal||"UNKNOWN",scoreDelta:orderbook.score_delta??0,entryBlocked:orderbook.entry_blocked===true,bidImbalance:orderbook.bid_imbalance??null,askWallRatio:orderbook.ask_wall_ratio??null,bidWallRatio:orderbook.bid_wall_ratio??null,askWallDepletion:orderbook.ask_wall_depletion??null,bestBidHeld:orderbook.best_bid_held??null,bidDepthHeld:orderbook.bid_depth_held??null,bestBid:orderbook.best_bid??null,bestAsk:orderbook.best_ask??null,askWallPrice:orderbook.ask_wall_price??null,bidWallPrice:orderbook.bid_wall_price??null}:null,dailyIgnition:daily?{score:daily.score,stage:daily.stage,available:daily.available,reasons:daily.reasons||[],turnoverRatio:daily.turnover_ratio,resistanceDistance:daily.resistance_distance,rsi:daily.rsi,higherLow:daily.higher_low,compression:daily.compression,obvDirection:daily.obv_direction,intradayScore:daily.intraday_score}:null,marketContext:context?{marketScore:context.marketScore,gateScore:context.gateScore,regime:context.regime,breadth:context.breadth,policyScore:context.policyScore,aiBias:context.aiBias,warOverride:context.warOverride}:null,shannonThorp:sizing?{support:sizing.support,shannonQuality:sizing.shannonQuality,estimatedWinP:sizing.estimatedWinP,referencePositionPct:sizing.referencePositionPct}:null,updated_at:row.ts};}
-async function readRecentHistory(db){try{const q=await db.from("gn_pre_pump_snapshots").select("run_id,rank,market,score,status,return5m,return15m,volume_ratio15m,krw_price,details,ts").order("ts",{ascending:false}).limit(TRACK_LIMIT);return q.error?[]:(q.data||[]);}catch{return [];}}
-async function readMarketTrend(db){try{const q=await db.from("gn_market_snapshots").select("ts,market_score,action,regime").order("ts",{ascending:false}).limit(4),r=q.error?[]:(q.data||[]),a=num(r[0]?.market_score),b=num(r.at(-1)?.market_score);return {score:a,delta:a!=null&&b!=null?a-b:null};}catch{return {score:null,delta:null};}}
-async function loadLatestPrePump(db){const latest=await db.from("gn_pre_pump_snapshots").select("run_id,ts").order("ts",{ascending:false}).limit(1).maybeSingle();if(latest.error)throw latest.error;if(!latest.data)return {top3:[],tracking:[]};const rows=await db.from("gn_pre_pump_snapshots").select("rank,market,score,status,return5m,return15m,volume_ratio15m,krw_price,details,ts").eq("run_id",latest.data.run_id).order("rank",{ascending:true}).limit(20);if(rows.error)throw rows.error;const [history,marketTrend]=await Promise.all([readRecentHistory(db),readMarketTrend(db)]),source=rows.data||[],latestMarkets=new Set(source.map(r=>r.market)),cutoff=new Date(latest.data.ts).getTime()-TRACK_HOURS*3600000,usable=(history.length?history:source).filter(r=>new Date(r.ts).getTime()>=cutoff),byMarket=new Map();for(const r of usable){if(!byMarket.has(r.market))byMarket.set(r.market,[]);byMarket.get(r.market).push(r);}for(const a of byMarket.values())a.sort((x,y)=>new Date(y.ts)-new Date(x.ts));const candidateRows=source.filter(isDisplayableTopCandidate).sort((a,b)=>Number(b.score)-Number(a.score)||Number(a.rank)-Number(b.rank));const built=[];for(const row of candidateRows){const a=byMarket.get(row.market)||[],chronological=a.slice().reverse(),firstSignal=chronological.find(r=>TOP3_STATUSES.has(String(r.status||"").toUpperCase())&&Number(r.score)>=68&&!isLatePump(r.details))||null,peakScore=a.reduce((m,r)=>Math.max(m,Number(r.score)||0),0),previous=a.find(r=>r.ts!==row.ts)||null,marketScore=marketTrend.score??marketScoreOf(row),marketDelta=marketTrend.delta,action=classifyAction({row,previous,firstSignal,peakScore,marketScore,marketDelta,inLatest:true,latestTs:latest.data.ts});built.push(formatCandidate(row,{firstSignal,peakScore,marketScore,marketDelta,inLatest:true,...action}));}
-const allowedTopActions=new Set(["진입","추가진입","진입대기"]);const top3=built.filter(x=>allowedTopActions.has(x.action)).sort((a,b)=>{const p={"진입":0,"추가진입":1,"진입대기":2};return (p[a.action]??9)-(p[b.action]??9)||Number(b.score)-Number(a.score);}).slice(0,3).map((x,i)=>({...x,rank:i+1}));
-const topMarkets=new Set(top3.map(x=>x.market)),tracking=[];for(const [market,a] of byMarket){if(topMarkets.has(market))continue;if(!a.some(r=>TOP3_STATUSES.has(String(r.status||"").toUpperCase())&&Number(r.score)>=68&&!isLatePump(r.details)))continue;const row=source.find(r=>r.market===market)||a[0];if(!row)continue;const chronological=a.slice().reverse(),firstSignal=chronological.find(r=>TOP3_STATUSES.has(String(r.status||"").toUpperCase())&&Number(r.score)>=68&&!isLatePump(r.details))||null,peakScore=a.reduce((m,r)=>Math.max(m,Number(r.score)||0),0),previous=a.find(r=>r.ts!==row.ts)||null,marketScore=marketTrend.score??marketScoreOf(row),marketDelta=marketTrend.delta,inLatest=latestMarkets.has(market),action=classifyAction({row,previous,firstSignal,peakScore,marketScore,marketDelta,inLatest,latestTs:latest.data.ts});tracking.push(formatCandidate(row,{rank:"추적",firstSignal,peakScore,marketScore,marketDelta,inLatest,...action}));}
-const priority={"매도":0,"매도준비":1,"보유":2,"보유점검":3,"추격금지":4,"진입대기":5};tracking.sort((a,b)=>(priority[a.action]??9)-(priority[b.action]??9)||Number(b.score)-Number(a.score));return {top3,tracking:tracking.slice(0,10)};}
-function createLatestPrePumpHandler({db,load=loadLatestPrePump}){return async function(req,res){try{return res.json(await load(db));}catch(error){return res.status(500).json({error:error?.message||"Failed to load scanner data"});}};}
+
+function isDisplayableTopCandidate(r){
+  if(!r||Number(r.rank)>=100)return false;
+  if(!TOP3_STATUSES.has(String(r.status||"").toUpperCase()))return false;
+  const s=num(r.score),r5=num(r.return5m),r15=num(r.return15m);
+  if(s==null||s<TOP3_MIN_SCORE||s>TOP3_MAX_SCORE)return false;
+  if(r5==null||r5<=0||r5>TOP3_MAX_RETURN_5M)return false;
+  if(r15==null||r15<=0||r15>TOP3_MAX_RETURN_15M)return false;
+  const d=r.details?.daily_ignition;
+  if(d?.available===true&&Number(d.score)<TOP3_MIN_DAILY_IGNITION)return false;
+  if(r.details?.market_block||r.details?.market_context?.warOverride===true||isLatePump(r.details))return false;
+  return true;
+}
+
+function classifyAction({row,marketScore}){
+  const score=num(row?.score)??0;
+  const status=String(row?.status||"").toUpperCase();
+  const r15=num(row?.return15m)??0;
+  const orderbook=orderbookOf(row);
+  const orderbookSignal=String(orderbook?.signal||"UNKNOWN");
+  const orderbookBlocked=orderbook?.entry_blocked===true||status==="CONFIRM_WAIT"||orderbookSignal==="SELL_PRESSURE"||orderbookSignal==="ASK_WALL";
+  if(isLatePump(row?.details)||status==="NO_CHASE")return {action:"추격금지",tone:"bad",reason:"과열/후행펌프 · 신규진입 금지",orderbookSignal};
+  if(orderbookBlocked)return {action:"진입대기",tone:"warn",reason:"호가 매도압력/매도벽 확인 필요",orderbookSignal};
+  if(marketScore!=null&&marketScore>=55&&marketScore<=69&&score>=68&&score<=82&&r15<=.03)return {action:"진입",tone:"good",reason:"시장·펌프 강도 확인 + 과열 전",orderbookSignal};
+  if(score>=68&&score<=82&&marketScore!=null&&marketScore>=55)return {action:"진입대기",tone:"blue",reason:"강도는 유효 · 진입 조건 재확인",orderbookSignal};
+  return {action:"진입대기",tone:"muted",reason:"신규진입 조건 일부 미충족",orderbookSignal};
+}
+
+function formatCandidate(row,x={}){
+  const context=row.details?.market_context||null;
+  const daily=row.details?.daily_ignition||null;
+  const orderbook=orderbookOf(row);
+  return {
+    rank:x.rank,
+    market:row.market,
+    score:row.score,
+    scannerStatus:row.status,
+    status:formatDashboardStatus({...x,orderbookSignal:x.orderbookSignal||orderbook?.signal}),
+    action:x.action,
+    actionTone:x.tone,
+    actionReason:x.reason,
+    holding:false,
+    inLatest:true,
+    return5m:row.return5m,
+    return15m:row.return15m,
+    volumeRatio15m:row.volume_ratio15m,
+    krwPrice:row.krw_price??null,
+    pumpDelta:null,
+    marketScore:x.marketScore??marketScoreOf(row),
+    marketDelta:x.marketDelta??null,
+    gainFromSignalPct:null,
+    ageMinutes:0,
+    reason:row.details?.confirmation?.reason||row.details?.market_block||null,
+    latePump:row.details?.late_pump||null,
+    orderbook:orderbook?{available:orderbook.available===true,signal:orderbook.signal||"UNKNOWN",entryBlocked:orderbook.entry_blocked===true}:null,
+    dailyIgnition:daily?{score:daily.score,stage:daily.stage,available:daily.available,reasons:daily.reasons||[]}:null,
+    marketContext:context?{marketScore:context.marketScore,gateScore:context.gateScore,regime:context.regime,breadth:context.breadth,policyScore:context.policyScore,aiBias:context.aiBias,warOverride:context.warOverride}:null,
+    updated_at:row.ts
+  };
+}
+
+async function readMarketTrend(db){
+  try{
+    const q=await db.from("gn_market_snapshots").select("ts,market_score").order("ts",{ascending:false}).limit(4);
+    const r=q.error?[]:(q.data||[]),a=num(r[0]?.market_score),b=num(r.at(-1)?.market_score);
+    return {score:a,delta:a!=null&&b!=null?a-b:null};
+  }catch{return {score:null,delta:null};}
+}
+
+async function loadLatestPrePump(db){
+  const latest=await db.from("gn_pre_pump_snapshots").select("run_id,ts").order("ts",{ascending:false}).limit(1).maybeSingle();
+  if(latest.error)throw latest.error;
+  if(!latest.data)return [];
+  const rows=await db.from("gn_pre_pump_snapshots").select("rank,market,score,status,return5m,return15m,volume_ratio15m,krw_price,details,ts").eq("run_id",latest.data.run_id).order("rank",{ascending:true}).limit(20);
+  if(rows.error)throw rows.error;
+  const marketTrend=await readMarketTrend(db);
+  const candidates=(rows.data||[]).filter(isDisplayableTopCandidate).sort((a,b)=>Number(b.score)-Number(a.score)||Number(a.rank)-Number(b.rank));
+  const evaluated=candidates.map(row=>{
+    const marketScore=marketTrend.score??marketScoreOf(row);
+    const action=classifyAction({row,marketScore});
+    return formatCandidate(row,{marketScore,marketDelta:marketTrend.delta,...action});
+  });
+  const allowed=new Set(["진입","진입대기"]);
+  return evaluated.filter(x=>allowed.has(x.action)).sort((a,b)=>{
+    const p={"진입":0,"진입대기":1};
+    return (p[a.action]??9)-(p[b.action]??9)||Number(b.score)-Number(a.score);
+  }).slice(0,3).map((x,i)=>({...x,rank:i+1}));
+}
+
+function createLatestPrePumpHandler({db,load=loadLatestPrePump}){
+  return async function(req,res){
+    try{return res.json(await load(db));}
+    catch(error){return res.status(500).json({error:error?.message||"Failed to load scanner data"});}
+  };
+}
+
 module.exports={classifyAction,createLatestPrePumpHandler,formatCandidate,isDisplayableTopCandidate,loadLatestPrePump};
