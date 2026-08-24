@@ -32,7 +32,7 @@ function buildPayload(provider,input){
       }
     };
   }
-  const maxTokens=provider.name==="perplexity"?Math.max(provider.maxOutputTokens,768):provider.maxOutputTokens;
+  const maxTokens=provider.name==="perplexity"?Math.max(provider.maxOutputTokens,768):provider.name==="deepseek"?Math.max(provider.maxOutputTokens,512):provider.maxOutputTokens;
   const payload={model:provider.model,messages:[{role:"system",content:prompt},{role:"user",content:JSON.stringify(input)}],max_tokens:maxTokens,stream:false};
   if(provider.name==="perplexity"){
     payload.response_format={
@@ -52,7 +52,10 @@ function buildPayload(provider,input){
       }
     };
   }
-  if(provider.name==="deepseek")payload.response_format={type:"json_object"};
+  if(provider.name==="deepseek"){
+    payload.thinking={type:"disabled"};
+    payload.response_format={type:"json_object"};
+  }
   return payload;
 }
 function responseText(provider,body){
