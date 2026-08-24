@@ -2,6 +2,7 @@
 
 const {scanPrePump}=require("./pre-pump-scanner");
 const {savePrePumpScan}=require("./pre-pump-store");
+const {enrichNewListingOverseas}=require("./new-listing-overseas");
 
 const DEFAULT_BLOCKED_MARKETS=new Set(["KRW-STORJ"]);
 const ORDERBOOK_SAMPLE_DELAY_MS=900;
@@ -123,6 +124,8 @@ function individualRiskGuard(row,analysis={}){
   else if(Number.isFinite(rsi)&&rsi>=68){penalty+=5;reasons.push("RSI_HOT");}
   if(analysis?.signal==="SELL_PRESSURE"){penalty+=10;reasons.push("SELL_PRESSURE");}
   else if(analysis?.signal==="ASK_WALL"){penalty+=6;reasons.push("ASK_WALL");}
+  const overseasDelta=Number(row?.overseasScoreDelta);
+  if(row?.newListing===true&&Number.isFinite(overseasDelta)&&overseasDelta<0){penalty+=Math.abs(overseasDelta);reasons.push(...(row.overseasReasons||[]));}
   const entryBlocked=noChase||analysis?.entryBlocked===true||reasons.length>=3;
   const scoreCap=noChase?64:entryBlocked?69:100;
   return {penalty,entryBlocked,noChase,scoreCap,reasons};
@@ -133,7 +136,7 @@ async function enrichOrderbookSignals(rows,{fetchImpl=fetch,sleep=ms=>new Promis
   const markets=rows.map(row=>row.market).filter(Boolean);
   const first=await fetchOrderbooks(markets,{fetchImpl});
   if(!first.size)return rows.map(row=>{
-    const guard=individualRiskGuard(row,{}),baseScore=Number(row.score)||0,adjustedScore=Math.max(0,Math.min(guard.scoreCap,baseScore-guard.penalty));
+    const guard=individualRiskGuard(row,{}),baseScore=Number(row.score)||0,bonus=row.newListing===true&&Number(row.overseasScoreDelta)>0?Number(row.overseasScoreDelta):0,adjustedScore=Math.max(0,Math.min(guard.scoreCap,baseScore+bonus-guard.penalty));
     let state=row.state;if(guard.noChase)state="NO_CHASE";else if(guard.entryBlocked&&state==="ENTRY")state="CONFIRM_WAIT";
     return {...row,score:+adjustedScore.toFixed(2),state,orderbookSignal:"UNKNOWN",orderbookAvailable:false,individualRiskBlocked:guard.entryBlocked,individualRiskPenalty:guard.penalty,individualRiskReasons:guard.reasons};
   });
@@ -142,7 +145,7 @@ async function enrichOrderbookSignals(rows,{fetchImpl=fetch,sleep=ms=>new Promis
   return rows.map(row=>{
     const analysis=analyzeOrderbookPair(first.get(row.market),second.get(row.market));
     const guard=individualRiskGuard(row,analysis);
-    const baseScore=Number(row.score)||0,orderbookDelta=analysis.available?analysis.scoreDelta:0,adjustedScore=Math.max(0,Math.min(guard.scoreCap,baseScore+orderbookDelta-guard.penalty));
+    const baseScore=Number(row.score)||0,orderbookDelta=analysis.available?analysis.scoreDelta:0,bonus=row.newListing===true&&Number(row.overseasScoreDelta)>0?Number(row.overseasScoreDelta):0,adjustedScore=Math.max(0,Math.min(guard.scoreCap,baseScore+orderbookDelta+bonus-guard.penalty));
     let state=row.state;
     if(guard.noChase)state="NO_CHASE";
     else if(guard.entryBlocked&&state==="ENTRY")state="CONFIRM_WAIT";
@@ -160,6 +163,14 @@ function formatResult(row){
     return5m:row.return5m,
     return15m:row.return15m,
     turnoverGrowth15m:row.turnoverGrowth15m,
+    newListing:row.newListing??false,
+    newListingAgeDays:row.newListingAgeDays??null,
+    overseasSource:row.overseasSource??null,
+    overseasListingUsd:row.overseasListingUsd??null,
+    overseasCurrentUsd:row.overseasCurrentUsd??null,
+    overseasReturnFromListing:row.overseasReturnFromListing??null,
+    upbitPremiumVsOverseas:row.upbitPremiumVsOverseas??null,
+    overseasScoreDelta:row.overseasScoreDelta??0,
     orderbookSignal:row.orderbookSignal??"UNKNOWN",
     orderbookBidImbalance:row.orderbookBidImbalance??null,
     orderbookAskWallDepletion:row.orderbookAskWallDepletion??null,
@@ -173,7 +184,8 @@ async function runUpbitPrePump({scanner=scanPrePump,save=savePrePumpScan,env=pro
   const results=await scanner({...scanOptions,fetchImpl});
   const safeResults=await filterUnsafeCandidates(results,{fetchImpl,env});
   const priced=await enrichKrwPrices(safeResults.slice(0,3),{fetchImpl});
-  const top3=await enrichOrderbookSignals(priced,{fetchImpl,sleep});
+  const overseas=await enrichNewListingOverseas(priced,{fetchImpl});
+  const top3=await enrichOrderbookSignals(overseas,{fetchImpl,sleep});
   try{await save({candidates:top3,env});}catch{}
   return top3.map(formatResult);
 }
