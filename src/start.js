@@ -5,7 +5,9 @@ const path=require("node:path");
 
 const PROVIDERS=["PERPLEXITY","XAI","DEEPSEEK","ANTHROPIC","GEMINI"];
 let aiRunning=false;
+let assistantRunning=false;
 let retryTimer=null;
+let assistantRetryTimer=null;
 
 function aiEnv(){
   const env={...process.env,AI_ANALYSIS_ENABLED:"true"};
@@ -33,17 +35,40 @@ function runAi(){
   });
 }
 
+function runAssistant(){
+  if(assistantRunning)return;
+  assistantRunning=true;
+  const child=spawn(process.execPath,["src/investment-assistant-runner.js"],{env:process.env,stdio:"inherit"});
+  child.on("exit",code=>{
+    assistantRunning=false;
+    if(code!==0){
+      console.error(`GN investment assistant exited with code ${code}; retrying in 60s`);
+      clearTimeout(assistantRetryTimer);
+      assistantRetryTimer=setTimeout(runAssistant,60000);
+    }
+  });
+  child.on("error",error=>{
+    assistantRunning=false;
+    console.error("GN investment assistant spawn error",error?.message||error);
+    clearTimeout(assistantRetryTimer);
+    assistantRetryTimer=setTimeout(runAssistant,60000);
+  });
+}
+
 const etfPreload=path.resolve(__dirname,"etf-dashboard-patch.js");
 const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,`--require=${etfPreload}`].filter(Boolean).join(" ")};
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
 
 setTimeout(runAi,5000);
+setTimeout(runAssistant,12000);
 setInterval(runAi,15*60*1000).unref();
+setInterval(runAssistant,15*60*1000).unref();
 
 for(const sig of ["SIGTERM","SIGINT"]){
   process.on(sig,()=>{
     clearTimeout(retryTimer);
+    clearTimeout(assistantRetryTimer);
     if(!server.killed)server.kill(sig);
   });
 }
