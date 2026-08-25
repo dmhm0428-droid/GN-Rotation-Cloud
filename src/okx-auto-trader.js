@@ -1,7 +1,7 @@
 "use strict";
 const crypto=require("crypto");
 const {cleanSecret,requestJson}=require("./exchanges/common");
-const BASE="https://openapi.okx.com";
+const BASE="https://www.okx.com";
 
 function auth(env=process.env){
   const key=cleanSecret(env.OKX_API_KEY),secret=cleanSecret(env.OKX_API_SECRET),passphrase=cleanSecret(env.OKX_PASSPHRASE);
