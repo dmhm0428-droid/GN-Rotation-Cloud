@@ -57,7 +57,8 @@ function runAssistant(){
 
 const etfPreload=path.resolve(__dirname,"etf-dashboard-patch.js");
 const markerPreload=path.resolve(__dirname,"dashboard-marker-patch.js");
-const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,`--require=${etfPreload}`,`--require=${markerPreload}`].filter(Boolean).join(" ")};
+const tradePlanPreload=path.resolve(__dirname,"trade-plan-dashboard-patch.js");
+const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,`--require=${etfPreload}`,`--require=${markerPreload}`,`--require=${tradePlanPreload}`].filter(Boolean).join(" ")};
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
 
