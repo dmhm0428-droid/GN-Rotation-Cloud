@@ -25,9 +25,10 @@ const DEFAULT_POLICY={
     confirmations:["market_risk_off","flow_out","higher_tf_break","volume_distribution"]
   },
 
-  // Legacy tax-loss inventory is sell-locked unless an exception applies.
-  // Keep the list configurable through GN_TAX_LOCK_SYMBOLS.
-  taxLockSymbols:["LSK","SOPH","SAND"],
+  // Legacy Upbit alt inventory is sell-locked unless an exception applies.
+  // BTC and ETH are intentionally NOT locked. Keep the list configurable
+  // through GN_TAX_LOCK_SYMBOLS.
+  taxLockSymbols:["SHIB","LINK","ETC","WLD","ONDO","LSK","ADA","SOPH","SAND"],
   taxLockDefault:true,
   taxLockExceptions:["delisting","forced_liquidation","custody_risk","user_override"],
 
