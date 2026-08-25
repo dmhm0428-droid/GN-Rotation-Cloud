@@ -59,7 +59,8 @@ const etfPreload=path.resolve(__dirname,"etf-dashboard-patch.js");
 const markerPreload=path.resolve(__dirname,"dashboard-marker-patch.js");
 const tradePlanPreload=path.resolve(__dirname,"trade-plan-dashboard-patch.js");
 const okxTradePreload=path.resolve(__dirname,"okx-trading-dashboard-patch.js");
-const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,`--require=${etfPreload}`,`--require=${markerPreload}`,`--require=${tradePlanPreload}`,`--require=${okxTradePreload}`].filter(Boolean).join(" ")};
+const top3PolicyPreload=path.resolve(__dirname,"top3-policy-patch.js");
+const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,`--require=${etfPreload}`,`--require=${markerPreload}`,`--require=${tradePlanPreload}`,`--require=${okxTradePreload}`,`--require=${top3PolicyPreload}`].filter(Boolean).join(" ")};
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
 
