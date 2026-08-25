@@ -43,7 +43,7 @@ async function getTradingStatus({env=process.env,fetchImpl=fetch}={}){
 }
 async function placeSpotLimit({instId,side,price,size,clientOrderId,env=process.env,fetchImpl=fetch}={}){
   const m=mode(env);
-  if(!instId||!['buy','sell'].includes(side)||!(Number(price)>0)||!(Number(size)>0))throw new Error("Invalid order parameters");
+  if(!instId||!["buy","sell"].includes(side)||!(Number(price)>0)||!(Number(size)>0))throw new Error("Invalid order parameters");
   if(m==="paper")return {mode:"paper",submitted:false,order:{instId,side,price:Number(price),size:Number(size),clientOrderId:clientOrderId||null}};
   if(m==="live"&&String(env.OKX_LIVE_TRADING_CONFIRM||"")!=="I_UNDERSTAND")throw new Error("LIVE trading locked");
   const body={instId,tdMode:"cash",side,ordType:"limit",px:String(price),sz:String(size)};
@@ -63,4 +63,48 @@ async function runPaperSelfTest({env=process.env,fetchImpl=fetch}={}){
   const preview=await placeSpotLimit({instId:"BTC-USDT",side:"buy",price:last,size,clientOrderId:`GNTEST${Date.now()}`,env:{...env,OKX_AUTO_TRADE_MODE:"paper"},fetchImpl});
   return {ok:true,stage:"paper",ts:new Date().toISOString(),status,ticker:{instId:"BTC-USDT",last},preview,warning:"PAPER ONLY - no order submitted"};
 }
-module.exports={mode,getTradingStatus,placeSpotLimit,runPaperSelfTest};
+
+async function getExistingHoldings({env=process.env,fetchImpl=fetch,minUsd=5}={}){
+  const data=await privateRequest("/api/v5/account/balance",{env,fetchImpl});
+  const details=data?.data?.[0]?.details||[];
+  const assets=details.map(r=>({
+    asset:String(r.ccy||"").toUpperCase(),
+    free:Number(r.availBal)||0,
+    frozen:Number(r.frozenBal)||0,
+    total:Number(r.cashBal)||0,
+    eqUsd:Number(r.eqUsd)||0,
+    avgPrice:Number(r.avgPx)||null,
+    upl:Number(r.upl)||null,
+    uplRatio:Number(r.uplRatio)||null
+  })).filter(r=>r.asset&&r.asset!=="USDT"&&r.eqUsd>=minUsd&&r.total>0);
+
+  const tickers=await requestJson(`${BASE}/api/v5/market/tickers?instType=SPOT`,{fetchImpl});
+  const byAsset={};
+  for(const t of tickers?.data||[]){
+    const id=String(t.instId||"");
+    if(id.endsWith("-USDT"))byAsset[id.slice(0,-5)]={instId:id,last:Number(t.last)||null};
+  }
+  return assets.map(r=>({...r,instId:byAsset[r.asset]?.instId||null,last:byAsset[r.asset]?.last||null})).filter(r=>r.instId&&r.last>0);
+}
+
+function buildRecoveryPolicy(position){
+  const avg=Number(position.avgPrice),last=Number(position.last),value=Number(position.eqUsd)||0;
+  const lossPct=avg>0&&last>0?(last/avg-1)*100:null;
+  let bucket="NORMAL_RECOVERY";
+  let action="회복구간 계산 대기";
+  if(lossPct!=null&&lossPct<=-80){bucket="DEEP_LOSS_LOCK";action="자동매도 잠금 · 별도 회수전략";}
+  else if(lossPct!=null&&lossPct<=-40){bucket="HEAVY_LOSS_RECOVERY";action="반등 저항 확인 후 분할회수";}
+  else if(lossPct!=null&&lossPct<0){bucket="RECOVERY";action="회복구간 분할회수";}
+  else if(lossPct!=null){bucket="PROFIT_PROTECT";action="수익보호 분할매도";}
+  return {asset:position.asset,instId:position.instId,valueUsd:+value.toFixed(2),qty:position.total,last,avgPrice:avg||null,lossPct:lossPct==null?null:+lossPct.toFixed(2),bucket,action,liveOrder:false};
+}
+
+async function getExistingRecoveryPreview({env=process.env,fetchImpl=fetch}={}){
+  const status=await getTradingStatus({env,fetchImpl});
+  if(!status.connected)return {ok:false,status,positions:[]};
+  const holdings=await getExistingHoldings({env,fetchImpl,minUsd:5});
+  const positions=holdings.map(buildRecoveryPolicy).sort((a,b)=>b.valueUsd-a.valueUsd);
+  return {ok:true,mode:mode(env),ts:new Date().toISOString(),positions,summary:{count:positions.length,totalUsd:+positions.reduce((s,x)=>s+x.valueUsd,0).toFixed(2),deepLoss:positions.filter(x=>x.bucket==="DEEP_LOSS_LOCK").length},warning:"PREVIEW ONLY - existing holdings are separated from GN new-money trades; no sell order is sent yet"};
+}
+
+module.exports={mode,getTradingStatus,placeSpotLimit,runPaperSelfTest,getExistingHoldings,getExistingRecoveryPreview,buildRecoveryPolicy};
