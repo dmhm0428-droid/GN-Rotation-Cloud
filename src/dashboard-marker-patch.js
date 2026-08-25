@@ -3,7 +3,7 @@
 // Dashboard compatibility + presentation patch.
 // Keeps all existing GN panels intact while:
 // 1) preserving the legacy marker required by the existing injector,
-// 2) normalizing user-facing actions to simple 매수/매도 labels,
+// 2) normalizing user-facing actions to simple 매수/대기/매도 labels,
 // 3) replacing stale BTC/ETH/SOL snapshot prices with fresh public Upbit quotes.
 
 const expressPath=require.resolve("express");
@@ -39,9 +39,9 @@ const UI_SCRIPT=`<script>
     var nodes=scope.querySelectorAll('.action,.coinAction,.pickAction,.subaction');
     nodes.forEach(function(el){
       var t=(el.textContent||'').trim();
-      if(t==='사지 마라'||t==='매수금지')el.textContent='매도';
-      else if(t==='사라'||t==='확인매수'||t==='추가매수'||t==='진입')el.textContent='매수';
-      else if(t==='기다려'||t==='관찰'||t==='검증중')el.textContent='대기';
+      if(t==='사라'||t==='확인매수'||t==='추가매수'||t==='진입')el.textContent='매수';
+      else if(t==='사지 마라'||t==='매수금지'||t==='기다려'||t==='관찰'||t==='검증중'||t==='추격금지')el.textContent='대기';
+      else if(t==='분할회수'||t==='강제정리'||t==='축소'||t==='매도')el.textContent='매도';
     });
   }
 
