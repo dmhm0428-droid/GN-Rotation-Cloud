@@ -48,14 +48,76 @@ function scoreLeaderFlow(history,current){
   return {leaderFlowScore:+score.toFixed(2),leaderFlowStage:flowStage(score,h.overheated,h.weakening),leaderFlowReasons:reasons.slice(0,7)};
 }
 
+function firstFinite(...values){for(const value of values){const n=Number(value);if(Number.isFinite(n))return n;}return null;}
+function todayEdgeScore(row){
+  // 목적: "좋은 코인"이 아니라 지금 들어가 오늘 안에 먹을 공간이 남은 코인을 우선한다.
+  // 15m/1h = 당장 갈 힘, 4h/day/week 계열 = 머리 위 저항/매물 공간 확인.
+  const d=row?.details||{};
+  const dailyDistance=firstFinite(row.dailyResistanceDistance,d.daily_ignition?.resistance_distance,d.daily?.resistance_distance);
+  const supplyDistance=firstFinite(row.nearestSupplyDistance,d.overhead_supply?.nearest_distance,d.supply?.nearest_distance);
+  const intradayDistance=firstFinite(row.resistanceProximity15m,d.structure?.resistance_proximity_15m);
+
+  const rooms=[];
+  if(Number.isFinite(dailyDistance)&&dailyDistance<0)rooms.push(-dailyDistance);
+  if(Number.isFinite(supplyDistance)&&supplyDistance>=0)rooms.push(supplyDistance);
+  if(Number.isFinite(intradayDistance)&&intradayDistance<0)rooms.push(-intradayDistance);
+  const headroom=rooms.length?Math.min(...rooms):null;
+
+  let roomScore=50;
+  if(Number.isFinite(headroom)){
+    if(headroom>=.08)roomScore=100;
+    else if(headroom>=.05)roomScore=88;
+    else if(headroom>=.03)roomScore=72;
+    else if(headroom>=.02)roomScore=56;
+    else if(headroom>=.012)roomScore=38;
+    else if(headroom>=.006)roomScore=20;
+    else roomScore=5;
+  }
+
+  const ret15=asNumber(row.return15m,0);
+  const turnover=firstFinite(row.turnoverGrowth15m,row.volume_ratio15m,d.volume?.growth15m)??0;
+  const obv=firstFinite(row.obvDirection,d.obv?.direction)??0;
+  const higherLow=row.higherLow15m===true||d.structure?.higher_low_15m===true;
+  const structure=String(row.structure1h||d.structure?.structure_1h||"");
+
+  let powerScore=45;
+  powerScore+=clamp(turnover*18,-20,25);
+  powerScore+=clamp(obv*22,-18,22);
+  if(higherLow)powerScore+=8;
+  if(structure==="sideways_breakout")powerScore+=12;
+  else if(structure==="uptrend")powerScore+=7;
+  else if(structure==="downtrend")powerScore-=14;
+  if(ret15>0&&ret15<=.035)powerScore+=8;
+  if(ret15>=.05)powerScore-=8;
+  if(ret15>=.08)powerScore-=18;
+  powerScore=clamp(powerScore);
+
+  let score=roomScore*.62+powerScore*.38;
+  let blocked=false;
+  const reasons=[];
+  if(Number.isFinite(headroom))reasons.push(`상단여유 ${(headroom*100).toFixed(1)}%`);else reasons.push("상단여유 데이터 부족");
+  if(powerScore>=65)reasons.push("장중 수급/가속 양호");
+  if(Number.isFinite(headroom)&&headroom<.008){score=Math.min(score,28);blocked=true;reasons.push("바로 위 저항");}
+  else if(Number.isFinite(headroom)&&headroom<.015){score=Math.min(score,45);reasons.push("수익공간 좁음");}
+  if(ret15>=.08){score=Math.min(score,38);blocked=true;reasons.push("이미 단기 급등");}
+
+  return {todayEdgeScore:+clamp(score).toFixed(2),todayHeadroom:Number.isFinite(headroom)?+headroom.toFixed(4):null,todayPowerScore:+powerScore.toFixed(2),todayEdgeBlocked:blocked,todayEdgeReasons:reasons.slice(0,4)};
+}
+
 function blendTop3Score(row,leaderFlow,marketScore=50,aiBias=0){
   const base=asNumber(row.score,0);
   const market=clamp(asNumber(marketScore,50));
   const ai=clamp(50+asNumber(aiBias,0)*50);
   const context=(market*.6+ai*.4);
-  const latePenalty=Math.min(5,Math.max(0,asNumber(row.details?.late_pump?.penalty,0)/14));
-  const final=clamp(base*.60+leaderFlow.leaderFlowScore*.25+context*.10-latePenalty);
-  return {...row,...leaderFlow,top3FinalScore:+final.toFixed(2),score:+final.toFixed(2)};
+  const edge=todayEdgeScore(row);
+  const latePenalty=Math.min(8,Math.max(0,asNumber(row.details?.late_pump?.penalty,row.latePumpPenalty??0)/10));
+
+  // TODAY EDGE가 1순위. 기존 스캐너/히스토리/시장점수는 확인용으로 낮춘다.
+  let final=clamp(edge.todayEdgeScore*.50+base*.22+leaderFlow.leaderFlowScore*.16+context*.12-latePenalty);
+  if(edge.todayEdgeBlocked)final=Math.min(final,49);
+  if(edge.todayHeadroom!=null&&edge.todayHeadroom<.015)final=Math.min(final,54);
+
+  return {...row,...leaderFlow,...edge,top3FinalScore:+final.toFixed(2),score:+final.toFixed(2)};
 }
 
-module.exports={scoreLeaderFlow,blendTop3Score,summarizeHistory,flowStage};
+module.exports={scoreLeaderFlow,blendTop3Score,summarizeHistory,flowStage,todayEdgeScore};
