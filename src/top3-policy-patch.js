@@ -1,12 +1,13 @@
 "use strict";
 
-// TOP3 freshness + signal-anchor policy layer.
+// TOP3 freshness + signal-anchor + live headroom policy layer.
 // - TOP3 is "up to 3", never padded with weak names.
 // - A 검증중 candidate may stay for only one 15m re-evaluation cycle.
-// - ENTRY signal price/time is anchored on the first ENTRY run and preserved
-//   while that market remains continuously present in TOP3.
-// - Later dashboard views show signal price vs current price, so a missed
-//   15-30 minute window can still be evaluated from the original entry anchor.
+// - ENTRY signal price/time is anchored on the first actionable ENTRY run.
+// - If the nearest live multi-timeframe resistance is too close, do not allow
+//   an ENTRY label just because momentum/OBV is strong.
+// - <0.8% first-resistance room: remove from TOP3 until breakout/retest resets room.
+// - 0.8~2.0% first-resistance room: keep only as 검증중, never actionable ENTRY.
 
 const expressPath=require.resolve("express");
 const originalExpress=require("express");
@@ -23,13 +24,44 @@ function numberOf(...values){
   for(const v of values){const n=Number(v);if(Number.isFinite(n)&&n>0)return n;}
   return null;
 }
+function finiteOf(...values){
+  for(const v of values){const n=Number(v);if(Number.isFinite(n))return n;}
+  return null;
+}
 function isEntryLike(x){
   const action=String(x?.action||"").toUpperCase();
   const status=String(x?.status||"").toUpperCase();
   return status==="ENTRY"||action==="진입"||action.includes("ENTRY")||action.includes("사라");
 }
+function applyLiveHeadroomGuard(payload){
+  if(!Array.isArray(payload))return payload;
+  const guarded=[];
+  for(const raw of payload){
+    const sr=raw?.timeframeContext?.supportResistance||{};
+    const distance=finiteOf(sr.resistanceDistance,raw?.todayHeadroom);
+    if(distance!=null&&distance>=0&&distance<.008){
+      // First wall is within 0.8%: there is not enough immediately monetizable room.
+      // Drop it now; after a real breakout, the next scan will calculate the next wall.
+      continue;
+    }
+    if(distance!=null&&distance>=.008&&distance<.020){
+      guarded.push({...raw,
+        action:"검증중",
+        status:String(raw.status||"").toUpperCase()==="ENTRY"?"CONFIRM_WAIT":raw.status,
+        headroomGuard:"NARROW",
+        headroomPct:+(distance*100).toFixed(2),
+        headroomReason:`첫 저항까지 ${(distance*100).toFixed(1)}% · 돌파/눌림 확인`});
+      continue;
+    }
+    guarded.push({...raw,
+      headroomGuard:distance==null?"UNKNOWN":"OPEN",
+      headroomPct:distance==null?null:+(distance*100).toFixed(2)});
+  }
+  return guarded;
+}
 
-function applyTop3Freshness(payload){
+function applyTop3Freshness(input){
+  const payload=applyLiveHeadroomGuard(input);
   if(!Array.isArray(payload))return payload;
   const runTs=normalizeRunTs(payload);
   if(!runTs)return payload;
@@ -51,8 +83,9 @@ function applyTop3Freshness(payload){
         waitState.set(market,{cycles:consecutive,runTs});
       }
 
-      // Anchor only the first actionable ENTRY while the signal remains present.
-      if(isEntryLike(x)&&!signalState.has(market)){
+      // Anchor only an actually actionable ENTRY. A narrow-headroom candidate
+      // must not create a misleading entry anchor before its wall is cleared.
+      if(isEntryLike(x)&&x.headroomGuard!=="NARROW"&&!signalState.has(market)){
         const entryPrice=numberOf(x.krw_price,x.krwPrice,x.price,x.currentPrice);
         signalState.set(market,{signalAt:x.updated_at||runTs,entryPrice,runTs});
       }
@@ -99,7 +132,8 @@ const SCRIPT=`<script>(function(){
       var top=(rows||[]).slice(0,3);
       if(!top.length)return '<div class="empty">지금은 신규 진입 후보 없음</div>';
       return top.map(function(r,i){
-        var a=simpleAction(r.status,r.score);
+        var actionRaw=r.action||r.status;
+        var a=simpleAction(actionRaw,r.score);
         var meta=[];
         if(r.entryPrice!=null){
           var t=fmtTime(r.signalAt),ep=fmtWon(r.entryPrice);
@@ -109,6 +143,8 @@ const SCRIPT=`<script>(function(){
         }else{
           meta.push(r.status||'');
         }
+        if(r.headroomPct!=null)meta.push('첫저항 '+Number(r.headroomPct).toFixed(1)+'%');
+        if(r.headroomGuard==='NARROW')meta.push('돌파/눌림 확인');
         if(r.signalAgeMin!=null)meta.push(Math.round(Number(r.signalAgeMin))+'분 경과');
         return '<div class="pick"><div class="rank">'+(i+1)+'</div><div><div class="pickName">'+String(r.market||'').replace('KRW-','')+'</div><div class="pickMeta">'+meta.join(' · ')+'</div></div><div class="pickAction '+a.cls+'">'+a.text+'</div></div>';
       }).join('');
