@@ -51,6 +51,16 @@ async function placeSpotLimit({instId,side,price,size,clientOrderId,env=process.
   const data=await privateRequest("/api/v5/trade/order",{method:"POST",body,env,fetchImpl});
   return {mode:m,submitted:true,response:data};
 }
+async function placeSpotMarketSell({instId,size,clientOrderId,env=process.env,fetchImpl=fetch}={}){
+  const m=mode(env);
+  if(!instId||!(Number(size)>0))throw new Error("Invalid sell parameters");
+  if(m==="paper")return {mode:"paper",submitted:false,order:{instId,side:"sell",ordType:"market",size:Number(size),clientOrderId:clientOrderId||null}};
+  if(m==="live"&&String(env.OKX_LIVE_TRADING_CONFIRM||"")!=="I_UNDERSTAND")throw new Error("LIVE trading locked");
+  const body={instId,tdMode:"cash",side:"sell",ordType:"market",sz:String(size)};
+  if(clientOrderId)body.clOrdId=String(clientOrderId).replace(/[^A-Za-z0-9]/g,"").slice(0,32);
+  const data=await privateRequest("/api/v5/trade/order",{method:"POST",body,env,fetchImpl});
+  return {mode:m,submitted:true,response:data};
+}
 async function runPaperSelfTest({env=process.env,fetchImpl=fetch}={}){
   const status=await getTradingStatus({env,fetchImpl});
   if(!status.connected)return {ok:false,stage:"auth",status};
@@ -85,6 +95,23 @@ async function getExistingHoldings({env=process.env,fetchImpl=fetch,minUsd=5}={}
     if(id.endsWith("-USDT"))byAsset[id.slice(0,-5)]={instId:id,last:Number(t.last)||null};
   }
   return assets.map(r=>({...r,instId:byAsset[r.asset]?.instId||null,last:byAsset[r.asset]?.last||null})).filter(r=>r.instId&&r.last>0);
+}
+
+async function sellExistingAssetNow({asset,percent=100,env=process.env,fetchImpl=fetch}={}){
+  const a=String(asset||"").toUpperCase();
+  const pct=Number(percent);
+  if(!a||a==="BTC")throw new Error("BTC existing holding is protected from this sell route");
+  if(!(pct>0&&pct<=100))throw new Error("Invalid sell percent");
+  const status=await getTradingStatus({env,fetchImpl});
+  if(!status.connected||!status.canTrade)throw new Error(status.reason||"OKX trade permission unavailable");
+  const holdings=await getExistingHoldings({env,fetchImpl,minUsd:0});
+  const p=holdings.find(x=>x.asset===a);
+  if(!p)throw new Error(`${a} holding not found`);
+  const sellable=Number(p.free)>0?Number(p.free):Number(p.total);
+  const size=+(sellable*pct/100).toPrecision(10);
+  if(!(size>0))throw new Error(`${a} sellable balance is zero`);
+  const order=await placeSpotMarketSell({instId:p.instId,size,clientOrderId:`GNEXIT${a}${Date.now()}`,env,fetchImpl});
+  return {ok:true,asset:a,percent:pct,size,instId:p.instId,last:p.last,mode:mode(env),submitted:order.submitted,order,warning:order.submitted?"LIVE/DEMO sell order submitted":"PAPER preview only - no real sell submitted"};
 }
 
 function paperTargetTemplate(bucket){
@@ -130,7 +157,7 @@ async function getExistingRecoveryPreview({env=process.env,fetchImpl=fetch}={}){
   if(!status.connected)return {ok:false,status,positions:[]};
   const holdings=await getExistingHoldings({env,fetchImpl,minUsd:5});
   const positions=holdings.map(buildRecoveryPolicy).sort((a,b)=>b.valueUsd-a.valueUsd);
-  return {ok:true,mode:mode(env),ts:new Date().toISOString(),positions,summary:{count:positions.length,totalUsd:+positions.reduce((s,x)=>s+x.valueUsd,0).toFixed(2),deepLoss:positions.filter(x=>x.bucket==="DEEP_LOSS_LOCK").length},warning:"PAPER ONLY - temporary recovery targets are previews; BTC is excluded and no sell order is sent"};
+  return {ok:true,mode:mode(env),ts:new Date().toISOString(),positions,summary:{count:positions.length,totalUsd:+positions.reduce((s,x)=>s+x.valueUsd,0).toFixed(2),deepLoss:positions.filter(x=>x.bucket==="DEEP_LOSS_LOCK").length},warning:"Recovery preview only; explicit sell-now route is separate and BTC is protected"};
 }
 
-module.exports={mode,getTradingStatus,placeSpotLimit,runPaperSelfTest,getExistingHoldings,getExistingRecoveryPreview,buildRecoveryPolicy,buildPaperRecoveryTargets};
+module.exports={mode,getTradingStatus,placeSpotLimit,placeSpotMarketSell,runPaperSelfTest,getExistingHoldings,getExistingRecoveryPreview,buildRecoveryPolicy,buildPaperRecoveryTargets,sellExistingAssetNow};
