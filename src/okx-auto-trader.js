@@ -51,4 +51,16 @@ async function placeSpotLimit({instId,side,price,size,clientOrderId,env=process.
   const data=await privateRequest("/api/v5/trade/order",{method:"POST",body,env,fetchImpl});
   return {mode:m,submitted:true,response:data};
 }
-module.exports={mode,getTradingStatus,placeSpotLimit};
+async function runPaperSelfTest({env=process.env,fetchImpl=fetch}={}){
+  const status=await getTradingStatus({env,fetchImpl});
+  if(!status.connected)return {ok:false,stage:"auth",status};
+  const ticker=await requestJson(`${BASE}/api/v5/market/ticker?instId=BTC-USDT`,{fetchImpl});
+  if(ticker?.code&&ticker.code!=="0")throw new Error(ticker.msg||`OKX ${ticker.code}`);
+  const last=Number(ticker?.data?.[0]?.last);
+  if(!(last>0))throw new Error("BTC-USDT ticker unavailable");
+  const notionalUsdt=5;
+  const size=+(notionalUsdt/last).toFixed(8);
+  const preview=await placeSpotLimit({instId:"BTC-USDT",side:"buy",price:last,size,clientOrderId:`GNTEST${Date.now()}`,env:{...env,OKX_AUTO_TRADE_MODE:"paper"},fetchImpl});
+  return {ok:true,stage:"paper",ts:new Date().toISOString(),status,ticker:{instId:"BTC-USDT",last},preview,warning:"PAPER ONLY - no order submitted"};
+}
+module.exports={mode,getTradingStatus,placeSpotLimit,runPaperSelfTest};
