@@ -87,6 +87,31 @@ async function getExistingHoldings({env=process.env,fetchImpl=fetch,minUsd=5}={}
   return assets.map(r=>({...r,instId:byAsset[r.asset]?.instId||null,last:byAsset[r.asset]?.last||null})).filter(r=>r.instId&&r.last>0);
 }
 
+function paperTargetTemplate(bucket){
+  if(bucket==="HEAVY_LOSS_RECOVERY")return [{upPct:10,sellPct:20},{upPct:20,sellPct:25},{upPct:35,sellPct:25}];
+  if(bucket==="RECOVERY")return [{upPct:7,sellPct:20},{upPct:12,sellPct:25},{upPct:20,sellPct:25}];
+  if(bucket==="PROFIT_PROTECT")return [{upPct:5,sellPct:20},{upPct:10,sellPct:25},{upPct:15,sellPct:25}];
+  return [];
+}
+function buildPaperRecoveryTargets({asset,last,qty,bucket}){
+  if(String(asset).toUpperCase()==="BTC")return {enabled:false,reason:"BTC 제외 · 별도 관리",targets:[]};
+  if(bucket==="DEEP_LOSS_LOCK")return {enabled:false,reason:"초대형 손실 잠금 · 자동매도 금지",targets:[]};
+  const p=Number(last),q=Number(qty);
+  if(!(p>0)||!(q>0))return {enabled:false,reason:"가격/수량 확인 필요",targets:[]};
+  const tpl=paperTargetTemplate(bucket);
+  const targets=tpl.map((t,i)=>({
+    level:i+1,
+    upPct:t.upPct,
+    sellPct:t.sellPct,
+    price:+(p*(1+t.upPct/100)).toPrecision(8),
+    size:+(q*t.sellPct/100).toPrecision(8),
+    side:"sell",
+    submitted:false,
+    mode:"paper"
+  }));
+  return {enabled:targets.length>0,reason:targets.length?"현재가 기준 임시 PAPER 회수선 · 실제 저항선 확정 전":"회수선 없음",targets};
+}
+
 function buildRecoveryPolicy(position){
   const avg=Number(position.avgPrice),last=Number(position.last),value=Number(position.eqUsd)||0;
   const lossPct=avg>0&&last>0?(last/avg-1)*100:null;
@@ -96,7 +121,8 @@ function buildRecoveryPolicy(position){
   else if(lossPct!=null&&lossPct<=-40){bucket="HEAVY_LOSS_RECOVERY";action="반등 저항 확인 후 분할회수";}
   else if(lossPct!=null&&lossPct<0){bucket="RECOVERY";action="회복구간 분할회수";}
   else if(lossPct!=null){bucket="PROFIT_PROTECT";action="수익보호 분할매도";}
-  return {asset:position.asset,instId:position.instId,valueUsd:+value.toFixed(2),qty:position.total,last,avgPrice:avg||null,lossPct:lossPct==null?null:+lossPct.toFixed(2),bucket,action,liveOrder:false};
+  const paperRecovery=buildPaperRecoveryTargets({asset:position.asset,last,qty:position.total,bucket});
+  return {asset:position.asset,instId:position.instId,valueUsd:+value.toFixed(2),qty:position.total,last,avgPrice:avg||null,lossPct:lossPct==null?null:+lossPct.toFixed(2),bucket,action,paperRecovery,liveOrder:false};
 }
 
 async function getExistingRecoveryPreview({env=process.env,fetchImpl=fetch}={}){
@@ -104,7 +130,7 @@ async function getExistingRecoveryPreview({env=process.env,fetchImpl=fetch}={}){
   if(!status.connected)return {ok:false,status,positions:[]};
   const holdings=await getExistingHoldings({env,fetchImpl,minUsd:5});
   const positions=holdings.map(buildRecoveryPolicy).sort((a,b)=>b.valueUsd-a.valueUsd);
-  return {ok:true,mode:mode(env),ts:new Date().toISOString(),positions,summary:{count:positions.length,totalUsd:+positions.reduce((s,x)=>s+x.valueUsd,0).toFixed(2),deepLoss:positions.filter(x=>x.bucket==="DEEP_LOSS_LOCK").length},warning:"PREVIEW ONLY - existing holdings are separated from GN new-money trades; no sell order is sent yet"};
+  return {ok:true,mode:mode(env),ts:new Date().toISOString(),positions,summary:{count:positions.length,totalUsd:+positions.reduce((s,x)=>s+x.valueUsd,0).toFixed(2),deepLoss:positions.filter(x=>x.bucket==="DEEP_LOSS_LOCK").length},warning:"PAPER ONLY - temporary recovery targets are previews; BTC is excluded and no sell order is sent"};
 }
 
-module.exports={mode,getTradingStatus,placeSpotLimit,runPaperSelfTest,getExistingHoldings,getExistingRecoveryPreview,buildRecoveryPolicy};
+module.exports={mode,getTradingStatus,placeSpotLimit,runPaperSelfTest,getExistingHoldings,getExistingRecoveryPreview,buildRecoveryPolicy,buildPaperRecoveryTargets};
