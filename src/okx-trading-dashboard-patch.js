@@ -1,0 +1,10 @@
+"use strict";
+const expressPath=require.resolve("express");
+const originalExpress=require("express");
+const {getTradingStatus}=require("./okx-auto-trader");
+
+const PANEL=`<h2>OKX 자동매매</h2><div class="hero" id="okxTradeBox"><div class="eyebrow">현물 자동매매 브리지</div><div class="action" id="okxTradeState">확인 중…</div><div class="subaction" id="okxTradeMeta">API 권한 확인 중</div></div>`;
+const SCRIPT=`<script>(function(){async function loadOkxTrade(){var s=document.getElementById('okxTradeState'),m=document.getElementById('okxTradeMeta');if(!s||!m)return;try{var r=await fetch('/api/okx/trading-status');var d=await r.json();if(!d.connected){s.textContent='연결확인';s.className='action warn';m.textContent=d.reason||'API 연결 확인 필요';return;}if(d.mode==='paper'){s.textContent='PAPER';s.className='action neutral';}else if(d.mode==='demo'){s.textContent='DEMO';s.className='action good';}else if(d.liveUnlocked){s.textContent='LIVE';s.className='action good';}else{s.textContent='LIVE 잠금';s.className='action warn';}m.textContent='권한 '+((d.perm||[]).join(', ')||'확인불가')+' · 주문권한 '+(d.canTrade?'있음':'없음')+(d.ip?' · IP '+d.ip:'');}catch(e){s.textContent='오류';s.className='action bad';m.textContent=e.message;}}loadOkxTrade();setInterval(loadOkxTrade,60000);})();</script>`;
+function inject(html){if(typeof html!=="string"||!html.includes("GN PIVOT"))return html;if(!html.includes('id="okxTradeBox"')){const a='<h2>내 매도가 · 예약매도</h2>';if(html.includes(a))html=html.replace(a,PANEL+a);else html=html.replace('</body>',PANEL+'</body>');}if(!html.includes("loadOkxTrade();setInterval"))html=html.replace('</body>',SCRIPT+'</body>');return html;}
+function wrappedExpress(...args){const app=originalExpress(...args);app.use((req,res,next)=>{if(req.path==='/api/okx/trading-status'){getTradingStatus().then(x=>res.json(x)).catch(e=>res.status(500).json({connected:false,reason:String(e?.message||e)}));return;}const send=res.send.bind(res);res.send=function(body){return send(inject(body));};next();});return app;}
+Object.assign(wrappedExpress,originalExpress);require.cache[expressPath].exports=wrappedExpress;
