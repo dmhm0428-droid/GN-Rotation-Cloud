@@ -1,12 +1,13 @@
 "use strict";
 
-// GN PIVOT retirement ETF + Capital Flow Gateway dashboard layer.
-// This is preloaded only for src/server.js. It deliberately does NOT replace
-// the existing pre-pump/short-term engine. The new layer sits above it and
-// decides whether the environment is RISK-ON / NEUTRAL / DEFENSIVE / CASH.
+// GN PIVOT retirement ETF + Capital Flow Gateway + Rescue dashboard layer.
+// This is preloaded only for src/server.js. It does NOT replace the existing
+// pre-pump/short-term engine and it does NOT send orders.
 
 const expressPath=require.resolve("express");
 const originalExpress=require("express");
+const {loadPortfolio}=require("./exchange-portfolio");
+const {evaluateRescue}=require("./rescue-policy");
 
 const ETF_WATCHLIST=[
   {code:"487230",name:"KODEX 미국AI전력핵심인프라"},
@@ -35,20 +36,10 @@ async function fetchQuote(item){
     const payload=await response.json();
     const q=payload?.datas?.[0];
     if(!q)throw new Error("NO_QUOTE_DATA");
-    return {
-      ...item,
-      price:num(q.closePrice),
-      change:num(q.compareToPreviousClosePrice),
-      changePct:num(q.fluctuationsRatio),
-      marketStatus:q.marketStatus||null,
-      tradedAt:q.localTradedAt||null,
-      source:"NAVER_FINANCE_PUBLIC_QUOTE"
-    };
+    return {...item,price:num(q.closePrice),change:num(q.compareToPreviousClosePrice),changePct:num(q.fluctuationsRatio),marketStatus:q.marketStatus||null,tradedAt:q.localTradedAt||null,source:"NAVER_FINANCE_PUBLIC_QUOTE"};
   }catch(error){
     return {...item,error:String(error?.name==="AbortError"?"QUOTE_TIMEOUT":error?.message||error)};
-  }finally{
-    clearTimeout(timer);
-  }
+  }finally{clearTimeout(timer);}
 }
 
 async function loadQuotes(){
@@ -57,6 +48,27 @@ async function loadQuotes(){
   const data={ts:new Date().toISOString(),items,source:"NAVER_FINANCE_PUBLIC_QUOTE",note:"퇴직연금 후보 ETF · 증권사 주문/잔고 API 미사용 · 공개 현재가만 표시"};
   quoteCache={at:Date.now(),data};
   return data;
+}
+
+async function loadRescueStatus(){
+  const portfolio=await loadPortfolio({exchanges:["upbit"]});
+  const upbit=portfolio.exchanges?.find(x=>x.exchange==="upbit");
+  if(!upbit?.enabled)return {available:false,mode:"PAPER",reason:"업비트 잔고 API 비활성",items:[]};
+  if(upbit.error)return {available:false,mode:"PAPER",reason:upbit.error,items:[]};
+
+  const items=(upbit.positions||[])
+    .filter(p=>p.asset!=="KRW"&&Number(p.total)>0)
+    .map(p=>{
+      const avg=Number(p.avgPrice)||null;
+      const price=Number(p.price)||null;
+      const profitPct=avg>0&&price>0?(price/avg-1)*100:null;
+      const position={symbol:p.asset,price,avgPrice:avg,profitPct};
+      // Delisting is never inferred from price. It must be explicitly verified
+      // by a later announcement checker before any execution worker can act.
+      const decision=evaluateRescue(position,{},{});
+      return {exchange:"upbit",symbol:p.asset,total:p.total,avgPrice:avg,price,valueQuote:p.valueQuote,profitPct:profitPct==null?null:+profitPct.toFixed(2),decision};
+    });
+  return {available:true,mode:"PAPER",ts:new Date().toISOString(),items,note:"표시/판정 전용 · 실제 주문 없음 · 상폐 예외는 공지 검증 전 자동실행 금지"};
 }
 
 const FLOW_PANEL_HTML=`<h2>돈의 발자국 · Capital Flow Gateway</h2>
@@ -68,6 +80,10 @@ const FLOW_PANEL_HTML=`<h2>돈의 발자국 · Capital Flow Gateway</h2>
   <div class="muted" id="flowScalp" style="margin-top:6px"></div>
 </div>`;
 
+const RESCUE_PANEL_HTML=`<h2>자동매도 보호 · Rescue</h2>
+<div class="muted" style="margin-bottom:8px">PAPER 모드 · 실제 주문 없음 · BTC/ETH 회수, 오래된 알트 LOCK</div>
+<div class="top3" id="rescueBox"><div class="empty">매도 보호 상태 불러오는 중…</div></div>`;
+
 const ETF_PANEL_HTML=`<h2>퇴직연금 ETF</h2><div class="muted" style="margin-bottom:8px">개별종목 추격보다 분산 ETF 중심 · 공개 시세 60초 자동 갱신</div><div class="grid" id="etfPrices"><div class="card muted">ETF 현재가 불러오는 중…</div></div>`;
 
 const PANEL_SCRIPT=`<script>
@@ -76,6 +92,7 @@ const PANEL_SCRIPT=`<script>
   function sign(x){const n=Number(x);if(!Number.isFinite(n))return '';return n>0?'+':'';}
   function cls(x){const n=Number(x);if(!Number.isFinite(n)||n===0)return '';return n>0?'good':'bad';}
   function n(v){v=Number(v);return Number.isFinite(v)?v:null;}
+  function esc(s){return String(s==null?'':s).replace(/[&<>\"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c]||c;});}
 
   function allocationFor(regime){
     if(regime==='RISK-ON')return {cash:15,safe:15,stock:45,crypto:25,label:'위험자산 우위'};
@@ -123,6 +140,35 @@ const PANEL_SCRIPT=`<script>
     }
   }
 
+  function rescueLabel(x){
+    var t=x&&x.decision&&x.decision.type||'HOLD';
+    if(t==='LOCKED')return {text:'자동매도 금지',klass:'warn'};
+    if(t==='SELL_PARTIAL')return {text:'분할회수',klass:'good'};
+    if(t==='SELL_EXIT')return {text:'강제정리',klass:'bad'};
+    return {text:'보유/검증',klass:'neutral'};
+  }
+
+  async function loadRescue(){
+    var box=document.getElementById('rescueBox');if(!box)return;
+    try{
+      var r=await fetch('/api/rescue/latest');if(!r.ok)throw new Error('HTTP '+r.status);
+      var d=await r.json();
+      if(!d.available){box.innerHTML='<div class="empty">Rescue 데이터 확인 · '+esc(d.reason||'연결 안 됨')+'</div>';return;}
+      var items=(d.items||[]).sort(function(a,b){
+        var pa=(a.symbol==='BTC'||a.symbol==='ETH')?0:(a.decision&&a.decision.type==='LOCKED'?2:1);
+        var pb=(b.symbol==='BTC'||b.symbol==='ETH')?0:(b.decision&&b.decision.type==='LOCKED'?2:1);
+        return pa-pb;
+      });
+      if(!items.length){box.innerHTML='<div class="empty">보유 코인 없음</div>';return;}
+      box.innerHTML=items.map(function(x){
+        var l=rescueLabel(x);var p=x.profitPct==null?'수익률 N/A':(sign(x.profitPct)+Number(x.profitPct).toFixed(2)+'%');
+        var reason=x.decision&&x.decision.reason||'';
+        var sell=x.decision&&x.decision.sellFraction?(' · 회수 '+Math.round(x.decision.sellFraction*100)+'%'):'';
+        return '<div class="pick"><div class="rank">'+esc(x.symbol.slice(0,3))+'</div><div><div class="pickName">'+esc(x.symbol)+'</div><div class="pickMeta">'+esc(p)+' · '+esc(reason)+esc(sell)+'</div></div><div class="pickAction '+l.klass+'">'+l.text+'</div></div>';
+      }).join('');
+    }catch(e){box.innerHTML='<div class="empty bad">Rescue 오류 · '+esc(e.message)+'</div>';}
+  }
+
   async function loadEtfPrices(){
     const box=document.getElementById('etfPrices');if(!box)return;
     try{
@@ -135,9 +181,8 @@ const PANEL_SCRIPT=`<script>
     }catch(e){box.innerHTML='<div class="card bad">ETF 시세 오류 · '+e.message+'</div>';}
   }
 
-  loadCapitalFlow();loadEtfPrices();
-  setInterval(loadCapitalFlow,60000);
-  setInterval(loadEtfPrices,60000);
+  loadCapitalFlow();loadRescue();loadEtfPrices();
+  setInterval(loadCapitalFlow,60000);setInterval(loadRescue,60000);setInterval(loadEtfPrices,60000);
 })();
 </script>`;
 
@@ -148,12 +193,17 @@ function injectDashboard(html){
     if(html.includes(firstAnchor))html=html.replace(firstAnchor,FLOW_PANEL_HTML+firstAnchor);
     else html=html.replace("</body>",FLOW_PANEL_HTML+"</body>");
   }
+  if(!html.includes('id="rescueBox"')){
+    const rescueAnchor="<h2>지금 볼 TOP3</h2>";
+    if(html.includes(rescueAnchor))html=html.replace(rescueAnchor,RESCUE_PANEL_HTML+rescueAnchor);
+    else html=html.replace("</body>",RESCUE_PANEL_HTML+"</body>");
+  }
   if(!html.includes('id="etfPrices"')){
     const anchor="<h2>거래소 잔고</h2>";
     if(html.includes(anchor))html=html.replace(anchor,ETF_PANEL_HTML+anchor);
     else html=html.replace("</body>",ETF_PANEL_HTML+"</body>");
   }
-  if(!html.includes("loadCapitalFlow()"))html=html.replace("</body>",PANEL_SCRIPT+"</body>");
+  if(!html.includes("loadRescue()"))html=html.replace("</body>",PANEL_SCRIPT+"</body>");
   return html;
 }
 
@@ -162,6 +212,10 @@ function wrappedExpress(...args){
   app.use((req,res,next)=>{
     if(req.path==="/api/etf/latest"){
       loadQuotes().then(data=>res.json(data)).catch(error=>res.status(500).json({error:String(error?.message||error)}));
+      return;
+    }
+    if(req.path==="/api/rescue/latest"){
+      loadRescueStatus().then(data=>res.json(data)).catch(error=>res.status(500).json({error:String(error?.message||error)}));
       return;
     }
     const originalSend=res.send.bind(res);
