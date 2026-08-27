@@ -3,9 +3,10 @@
 // Dashboard compatibility + presentation patch.
 // Keeps all existing GN panels intact while:
 // 1) preserving the legacy marker required by the existing injector,
-// 2) normalizing user-facing actions to simple 매수/대기/매도 labels,
-// 3) replacing stale BTC/ETH/SOL snapshot prices with fresh public Upbit quotes,
-// 4) hardening dashboard buttons for mobile touch.
+// 2) normalizing only broad dashboard actions to simple 매수/대기/매도 labels,
+// 3) preserving TOP3-specific states such as 검증중,
+// 4) replacing stale BTC/ETH/SOL snapshot prices with fresh public Upbit quotes,
+// 5) hardening dashboard buttons for mobile touch.
 
 const expressPath=require.resolve("express");
 const priorExpress=require("express");
@@ -43,11 +44,13 @@ const UI_SCRIPT=`<script data-gn-dashboard-ui="1">
 (function(){
   function normalizeActions(root){
     var scope=root&&root.querySelectorAll?root:document;
-    var nodes=scope.querySelectorAll('.action,.coinAction,.pickAction,.subaction');
+    // TOP3 .pickAction is intentionally excluded. It must keep semantic states
+    // such as 검증중 instead of being flattened to generic 대기.
+    var nodes=scope.querySelectorAll('.action,.coinAction,.subaction');
     nodes.forEach(function(el){
       var t=(el.textContent||'').trim();
       if(t==='사라'||t==='확인매수'||t==='추가매수'||t==='진입')el.textContent='매수';
-      else if(t==='사지 마라'||t==='매수금지'||t==='기다려'||t==='관찰'||t==='검증중'||t==='추격금지')el.textContent='대기';
+      else if(t==='사지 마라'||t==='매수금지'||t==='기다려'||t==='관찰'||t==='추격금지')el.textContent='대기';
       else if(t==='분할회수'||t==='강제정리'||t==='축소'||t==='매도')el.textContent='매도';
     });
   }
