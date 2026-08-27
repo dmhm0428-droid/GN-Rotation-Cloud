@@ -115,32 +115,43 @@ function applyTop3Freshness(input){
 const SCRIPT=`<script>(function(){
   function fmtWon(v){var n=Number(v);if(!Number.isFinite(n))return null;return n.toLocaleString('ko-KR')+'원';}
   function fmtTime(v){if(!v)return null;var d=new Date(v);if(isNaN(d))return null;return d.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});}
+  function isCurrentEntry(r){
+    var action=String(r&&r.action||'').toUpperCase();
+    var status=String(r&&r.scannerStatus||'').toUpperCase();
+    return status==='ENTRY'||action==='진입'||action==='선발대'||action.indexOf('ENTRY')>=0||action.indexOf('사라')>=0;
+  }
+  function displayState(r){
+    var raw=String(r&&r.action||r&&r.status||'');
+    if(raw==='검증중'||r&&r.headroomGuard==='NARROW')return {text:'검증중',cls:'warn'};
+    if(isCurrentEntry(r))return {text:'매수',cls:'good'};
+    return simpleAction(raw,r&&r.score);
+  }
   if(typeof window.top3Cards==='function'&&!window.__gnSignalPricePatched){
     window.__gnSignalPricePatched=true;
     window.top3Cards=function(rows){
       var top=(rows||[]).slice(0,3);
       if(!top.length)return '<div class="empty">지금은 신규 진입 후보 없음</div>';
       return top.map(function(r,i){
-        var actionRaw=r.action||r.status;
-        var a=simpleAction(actionRaw,r.score);
+        var a=displayState(r);
+        var currentEntry=isCurrentEntry(r);
         var meta=[];
         if(r.entryPrice!=null){
-          var t=fmtTime(r.signalAt),ep=fmtWon(r.entryPrice),label=r.signalAction==='선발대'?'선발대가':'진입가';
+          var t=fmtTime(r.signalAt),ep=fmtWon(r.entryPrice);
+          var label=currentEntry?(r.signalAction==='선발대'?'선발대가':'진입가'):'이전 신호가';
           meta.push(label+' '+(t?t+' · ':'')+ep);
           if(r.currentPrice!=null&&Number(r.currentPrice)!==Number(r.entryPrice))meta.push('현재 '+fmtWon(r.currentPrice));
           if(r.moveFromEntryPct!=null)meta.push('신호후 '+(Number(r.moveFromEntryPct)>=0?'+':'')+Number(r.moveFromEntryPct).toFixed(1)+'%');
-        }else meta.push(r.action||r.status||'');
+        }else if(r.action||r.status)meta.push(r.action||r.status);
         if(r.headroomPct!=null)meta.push('첫저항 '+Number(r.headroomPct).toFixed(1)+'%');
         if(r.headroomGuard==='NARROW')meta.push('돌파/눌림 확인');
         if(r.signalAgeMin!=null)meta.push(Math.round(Number(r.signalAgeMin))+'분 경과');
-        return '<div class="pick"><div class="rank">'+(i+1)+'</div><div><div class="pickName">'+String(r.market||'').replace('KRW-','')+'</div><div class="pickMeta">'+meta.join(' · ')+'</div></div><div class="pickAction '+a.cls+'">'+a.text+'</div></div>';
+        if(String(r.action||'')==='검증중')meta.push('매수 아님');
+        return '<div class="pick"><div class="rank">'+(i+1)+'</div><div><div class="pickName">'+String(r.market||'').replace('KRW-','')+'</div><div class="pickMeta">'+meta.join(' · ')+'</div></div><div class="pickAction '+a.cls+'" data-gn-state="'+a.text+'">'+a.text+'</div></div>';
       }).join('');
     };
   }
   function patchTop3Labels(){
     document.querySelectorAll('h2').forEach(function(h){if((h.textContent||'').trim()==='지금 볼 TOP3')h.textContent='지금 볼 후보 · 최대 3개';});
-    var box=document.querySelector('.top3');if(!box)return;
-    box.querySelectorAll('.pick').forEach(function(p){var action=p.querySelector('.pickAction');var meta=p.querySelector('.pickMeta');if(action&&(action.textContent||'').trim()==='대기'&&meta&&!meta.textContent.includes('15분 재평가'))meta.textContent += ' · 15분 재평가';});
   }
   patchTop3Labels();
   new MutationObserver(patchTop3Labels).observe(document.documentElement,{subtree:true,childList:true,characterData:true});
