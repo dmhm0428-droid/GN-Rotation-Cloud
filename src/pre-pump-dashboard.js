@@ -1,11 +1,10 @@
 "use strict";
 
 const TOP3_MIN_SCORE=58;
-const TOP3_MAX_SCORE=82;
 const TOP3_MAX_RETURN_5M=.035;
 const TOP3_MAX_RETURN_15M=.06;
 const TOP3_MIN_DAILY_IGNITION=45;
-const TOP3_STATUSES=new Set(["SCOUT","ENTRY","CONFIRM_WAIT"]);
+const TOP3_STATUSES=new Set(["SCOUT","ENTRY","CONFIRM_WAIT","IGNITION_WATCH"]);
 const UPBIT_BASE="https://api.upbit.com";
 
 const num=v=>{const n=Number(v);return Number.isFinite(n)?n:null;};
@@ -168,9 +167,9 @@ function isDisplayableTopCandidate(r){
   if(!r||Number(r.rank)>=100)return false;
   if(!TOP3_STATUSES.has(String(r.status||"").toUpperCase()))return false;
   const s=num(r.score),r5=num(r.return5m),r15=num(r.return15m);
-  if(s==null||s<TOP3_MIN_SCORE||s>TOP3_MAX_SCORE)return false;
-  if(r5==null||r5<=0||r5>TOP3_MAX_RETURN_5M)return false;
-  if(r15==null||r15<=0||r15>TOP3_MAX_RETURN_15M)return false;
+  if(s==null||s<TOP3_MIN_SCORE)return false;
+  if(r5==null||r5>TOP3_MAX_RETURN_5M)return false;
+  if(r15==null||r15>TOP3_MAX_RETURN_15M)return false;
   const d=r.details?.daily_ignition;
   if(d?.available===true&&Number(d.score)<TOP3_MIN_DAILY_IGNITION)return false;
   if(r.details?.market_block||r.details?.market_context?.warOverride===true||isLatePump(r.details))return false;
