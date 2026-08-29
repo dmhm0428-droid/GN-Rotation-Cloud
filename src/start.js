@@ -32,13 +32,14 @@ function runAssistant(){
 }
 
 // Response post-processing order is the reverse of this preload list.
-// Keep activation before final body replacement, then inject runtime compatibility
-// and resilience AFTER the final dashboard exists so their scripts are not erased.
+// Activation marks the base page, final-dashboard replaces the body, and all
+// runtime/rescue scripts are injected after that replacement so they survive.
 const preloads=[
   "top3-policy-patch.js",
   "strict-verification-gate-patch.js",
   "dashboard-resilience-patch.js",
   "dashboard-runtime-hotfix.js",
+  "dashboard-hard-rescue.js",
   "final-dashboard-patch.js",
   "dashboard-activation-hotfix.js"
 ].map(x=>path.resolve(__dirname,x));
