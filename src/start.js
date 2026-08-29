@@ -13,8 +13,8 @@ let assistantRetryTimer=null;
 function aiEnv(){
   const env={...process.env,AI_ANALYSIS_ENABLED:"true"};
   for(const name of PROVIDERS)env[`${name}_ENABLED`]="true";
-  if(!env.XAI_TIMEOUT_MS)env.XAI_TIMEOUT_MS="45000";
-  if(!env.GEMINI_TIMEOUT_MS)env.GEMINI_TIMEOUT_MS="45000";
+  if(!env.XAI_TIMEOUT_MS)env.XAI_TIMEOUT_MS="60000";
+  if(!env.GEMINI_TIMEOUT_MS)env.GEMINI_TIMEOUT_MS="60000";
   env.NODE_OPTIONS=[process.env.NODE_OPTIONS,`--require=${aiProviderCompat}`].filter(Boolean).join(" ");
   return env;
 }
