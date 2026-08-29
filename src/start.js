@@ -31,8 +31,17 @@ function runAssistant(){
   child.on("error",error=>{assistantRunning=false;console.error("GN investment assistant scheduler spawn error",error?.message||error);clearTimeout(assistantRetryTimer);assistantRetryTimer=setTimeout(runAssistant,60000);});
 }
 
-// Keep server/API stack unchanged; resilience patch only post-processes the rendered dashboard HTML.
-const preloads=["top3-policy-patch.js","strict-verification-gate-patch.js","final-dashboard-patch.js","dashboard-activation-hotfix.js","dashboard-resilience-patch.js"].map(x=>path.resolve(__dirname,x));
+// Response post-processing order is the reverse of this preload list.
+// Keep activation before final body replacement, then inject runtime compatibility
+// and resilience AFTER the final dashboard exists so their scripts are not erased.
+const preloads=[
+  "top3-policy-patch.js",
+  "strict-verification-gate-patch.js",
+  "dashboard-resilience-patch.js",
+  "dashboard-runtime-hotfix.js",
+  "final-dashboard-patch.js",
+  "dashboard-activation-hotfix.js"
+].map(x=>path.resolve(__dirname,x));
 const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,...preloads.map(x=>`--require=${x}`)].filter(Boolean).join(" ")};
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
