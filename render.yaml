@@ -4,6 +4,8 @@ services:
     runtime: node
     plan: free
     region: singapore
+    autoDeployTrigger: commit
+    renderSubdomainPolicy: enabled
     buildCommand: npm install --omit=dev
     startCommand: npm start
     healthCheckPath: /health
@@ -46,6 +48,7 @@ services:
     runtime: node
     plan: starter
     region: singapore
+    autoDeployTrigger: commit
     buildCommand: npm install --omit=dev
     startCommand: npm run ai:analyze
     schedule: "*/15 * * * *"
