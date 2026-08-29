@@ -32,9 +32,10 @@ function runAssistant(){
 }
 
 // Response post-processing order is the reverse of this preload list.
-// Activation marks the base page, final-dashboard replaces the body, and all
-// runtime/rescue scripts are injected after that replacement so they survive.
+// The live-summary patch is intentionally first so its rendered values are
+// injected last and cannot be replaced by fallback/rescue placeholders.
 const preloads=[
+  "dashboard-live-summary-patch.js",
   "top3-policy-patch.js",
   "strict-verification-gate-patch.js",
   "dashboard-resilience-patch.js",
