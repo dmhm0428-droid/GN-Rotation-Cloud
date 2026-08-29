@@ -53,17 +53,18 @@ function buildPayload(provider,input){
 
 function recursiveText(node,out=[]){
   if(node==null)return out;
-  if(typeof node==="string")return out;
+  if(typeof node==="string"){if(node.trim())out.push(node);return out;}
   if(Array.isArray(node)){for(const x of node)recursiveText(x,out);return out;}
   if(typeof node==="object"){
-    if((node.type==="output_text"||node.type==="text")&&typeof node.text==="string")out.push(node.text);
-    if(typeof node.content==="string"&&node.role==="assistant")out.push(node.content);
-    for(const [k,v] of Object.entries(node))if(!["text","content"].includes(k))recursiveText(v,out);
+    if(typeof node.output_text==="string"&&node.output_text.trim())out.push(node.output_text);
+    if(typeof node.text==="string"&&node.text.trim())out.push(node.text);
+    if(typeof node.content==="string"&&node.content.trim())out.push(node.content);
+    for(const [k,v] of Object.entries(node))if(!["output_text","text","content"].includes(k))recursiveText(v,out);
   }
   return out;
 }
 function responseText(provider,body){
-  if(provider.name==="xai")return recursiveText(body,[]).join("\n");
+  if(provider.name==="xai")return recursiveText(body,[]).filter((x,i,a)=>a.indexOf(x)===i).join("\n");
   if(provider.kind==="anthropic")return body?.content?.filter(x=>x?.type==="text").map(x=>x.text||"").join("");
   if(provider.kind==="gemini")return body?.candidates?.[0]?.content?.parts?.filter(x=>!x?.thought).map(x=>x?.text||"").join("");
   return body?.choices?.[0]?.message?.content;
