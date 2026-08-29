@@ -1,30 +1,14 @@
 "use strict";
 
 // Runtime compatibility patch for mandatory five-AI verification.
-// xAI: use the broadly available Chat Completions API instead of Responses
-// search-tool mode, which can return 403 when the key lacks tool entitlement.
+// xAI: keep the native Responses API so web_search + x_search remain available.
+// The previous Chat Completions rewrite removed those tools and did not resolve 403.
 // Gemini: keep Search grounding, but avoid JSON MIME + search incompatibility.
 const originalFetch=global.fetch;
 if(typeof originalFetch==="function"&&!global.__gnAiProviderCompat){
   global.__gnAiProviderCompat=true;
   global.fetch=async function(input,init={}){
-    let url=typeof input==="string"?input:String(input?.url||input||"");
-    if(url==="https://api.x.ai/v1/responses"&&typeof init?.body==="string"){
-      try{
-        const body=JSON.parse(init.body);
-        const msgs=Array.isArray(body.input)?body.input.map(x=>({role:x.role||"user",content:typeof x.content==="string"?x.content:String(x.content||"")})):[];
-        const chat={
-          model:body.model,
-          messages:msgs,
-          max_tokens:Math.max(Number(body.max_output_tokens)||0,768),
-          stream:false,
-          response_format:{type:"json_object"}
-        };
-        url="https://api.x.ai/v1/chat/completions";
-        input=url;
-        init={...init,body:JSON.stringify(chat)};
-      }catch{}
-    }
+    const url=typeof input==="string"?input:String(input?.url||input||"");
     if(/generativelanguage\.googleapis\.com\/.+:generateContent/i.test(url)&&typeof init?.body==="string"){
       try{
         const body=JSON.parse(init.body);
