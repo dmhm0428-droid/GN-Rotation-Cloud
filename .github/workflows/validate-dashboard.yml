@@ -17,6 +17,7 @@ jobs:
       - run: npm install --ignore-scripts
       - run: node --check src/start.js
       - run: node --check src/dashboard-resilience-patch.js
+      - run: node --check src/dashboard-hard-rescue.js
       - run: node --check src/final-dashboard-patch.js
       - run: node --test test/dashboard-resilience.test.js
       - name: Verify Render build configuration
@@ -53,20 +54,30 @@ jobs:
     timeout-minutes: 3
     continue-on-error: true
     steps:
-      - name: Probe conventional Render host
+      - name: Find live Render dashboard host
         shell: bash
         run: |
           set -u
-          base='https://gn-rotation-dashboard.onrender.com'
-          for path in /health /login; do
-            echo "PROBE $base$path"
-            curl -L -v --connect-timeout 8 --max-time 15 "$base$path" -o /tmp/body 2>&1 | tail -n 30 || true
-            test -f /tmp/body && head -c 500 /tmp/body || true
-            echo
+          hosts=(
+            gn-rotation-dashboard.onrender.com
+            gn-rotation-cloud.onrender.com
+            gn-pivot.onrender.com
+            gn-pivot-dashboard.onrender.com
+            gn-rotation-cloud-v4-clean.onrender.com
+            gn-rotation.onrender.com
+          )
+          found=''
+          for host in "${hosts[@]}"; do
+            code=$(curl -L -sS -o /tmp/health -w '%{http_code}' --connect-timeout 5 --max-time 10 "https://$host/health" || true)
+            body=$(cat /tmp/health 2>/dev/null || true)
+            echo "PROBE $host => $code $body"
+            if [ "$code" = '200' ] && printf '%s' "$body" | grep -q '"ok"'; then found="$host"; break; fi
           done
-          code=$(curl -L -sS -o /tmp/health -w '%{http_code}' --connect-timeout 8 --max-time 15 "$base/health" || true)
-          test "$code" = '200'
-          grep -q '"ok"' /tmp/health
+          test -n "$found"
+          echo "LIVE_RENDER_HOST=$found"
+          curl -L -fsS --max-time 10 "https://$found/login" -o /tmp/login
+          grep -q 'GN PIVOT' /tmp/login
+          grep -q '로그인' /tmp/login
 
   legacy-regression-report:
     runs-on: ubuntu-latest
