@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  validate:
+  dashboard-safety:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -18,4 +18,16 @@ jobs:
       - run: node --check src/start.js
       - run: node --check src/dashboard-resilience-patch.js
       - run: node --check src/final-dashboard-patch.js
+      - run: node --test test/dashboard-resilience.test.js
+
+  legacy-regression-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --ignore-scripts
       - run: npm test
