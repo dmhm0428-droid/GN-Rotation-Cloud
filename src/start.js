@@ -31,10 +31,10 @@ function runAssistant(){
   child.on("error",error=>{assistantRunning=false;console.error("GN investment assistant scheduler spawn error",error?.message||error);clearTimeout(assistantRetryTimer);assistantRetryTimer=setTimeout(runAssistant,60000);});
 }
 
-// Response post-processing order is the reverse of this preload list.
-// The live-summary patch is intentionally first so its rendered values are
-// injected last and cannot be replaced by fallback/rescue placeholders.
+// Response post-processing order is reverse preload order.
+// Authoritative dashboard is first so it renders LAST and removes stale/fallback UI.
 const preloads=[
+  "dashboard-authoritative-v1.js",
   "dashboard-live-summary-patch.js",
   "top3-policy-patch.js",
   "strict-verification-gate-patch.js",
@@ -48,7 +48,5 @@ const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,...preloa
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
 setTimeout(runAi,5000);setTimeout(runAssistant,12000);
-// GN validation is a live watchdog. Each runner is overlap-protected, so a
-// slow provider call never creates concurrent duplicate runs.
 setInterval(runAi,60*1000).unref();setInterval(runAssistant,60*1000).unref();
 for(const sig of ["SIGTERM","SIGINT"]){process.on(sig,()=>{clearTimeout(retryTimer);clearTimeout(assistantRetryTimer);if(!server.killed)server.kill(sig);});}
