@@ -6,6 +6,8 @@ const {analyzeSnapshot}=require("./ai/analyzer");
 const {storeAnalyses}=require("./ai/store");
 const {buildConsensus,storeConsensus}=require("./ai/consensus");
 
+function explicitTrue(v){return /^(1|true|yes|on)$/i.test(String(v??""));}
+
 async function latestOne(db,table){
   const {data,error}=await db.from(table).select("*").order("ts",{ascending:false}).limit(1).maybeSingle();
   if(error)return null;
@@ -65,6 +67,12 @@ async function buildEvidenceBundle(db){
 }
 
 async function main(){
+  // Emergency cost kill switch: paid AI traffic is OFF unless this separate flag is explicitly true.
+  // AI_ANALYSIS_ENABLED alone is no longer sufficient to send any provider request.
+  if(!explicitTrue(process.env.AI_PAID_REQUESTS_ENABLED)){
+    console.log("Paid AI requests are disabled by AI_PAID_REQUESTS_ENABLED kill switch; no provider requests were sent.");
+    return;
+  }
   const config=loadAiConfig();
   if(!config.enabled){console.log("AI analysis is disabled; no provider requests were sent.");return;}
   const url=process.env.SUPABASE_URL,key=process.env.SUPABASE_SERVICE_ROLE_KEY;if(!url||!key)throw new Error("Supabase env vars missing");
