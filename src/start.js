@@ -32,8 +32,10 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
-// Rotation is loaded before authoritative so it renders after authoritative output.
+// Drilldown is loaded before rotation so the final HTML contains the rotation block first,
+// followed by the external drilldown script. This avoids inline-script leakage into the page.
 const preloads=[
+  "dashboard-rotation-drilldown-v2.js",
   "dashboard-rotation-v1.js",
   "dashboard-authoritative-v1.js",
   "dashboard-live-summary-patch.js",
