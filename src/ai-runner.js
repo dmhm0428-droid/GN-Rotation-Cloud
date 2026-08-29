@@ -20,32 +20,46 @@ async function latestBatch(db,table,limit=12){
 async function latestCrypto(db){
   const {data:runs}=await db.from("gn_runs").select("id,started_at,status,source_status").order("started_at",{ascending:false}).limit(60);
   const run=(runs||[]).find(r=>String(r?.source_status?.source||"").includes("pre_pump_scanner"))||null;
-  if(!run?.id)return {run:null,rows:[]};
-  const {data}=await db.from("gn_pre_pump_snapshots").select("*").eq("run_id",run.id).order("rank",{ascending:true}).limit(3);
-  return {run,rows:data||[]};
+  if(!run?.id)return {run:null,rows:[],watchlist:[],actionable_top_count:0};
+  const {data}=await db.from("gn_pre_pump_snapshots").select("*").eq("run_id",run.id).order("rank",{ascending:true}).limit(15);
+  const all=data||[];
+  const rows=all.filter(r=>Number(r.rank)>=1&&Number(r.rank)<=3&&Number(r.score)>=50&&["SCOUT","ENTRY"].includes(String(r.status)));
+  const watchlist=all.filter(r=>Number(r.rank)>=20).slice(0,5);
+  return {run,rows,watchlist,actionable_top_count:rows.length};
 }
 async function buildEvidenceBundle(db){
-  const [market,macro,assets,sectors,reps,crypto]=await Promise.all([
+  const [market,macro,assets,sectors,reps,crypto,onchain]=await Promise.all([
     latestOne(db,"gn_market_snapshots"),
     latestOne(db,"gn_macro_regime"),
     latestBatch(db,"gn_asset_flow_scores",8),
     latestBatch(db,"gn_sector_flow_scores",16),
     latestBatch(db,"gn_representatives",32),
-    latestCrypto(db)
+    latestCrypto(db),
+    latestBatch(db,"gn_latest_onchain_scores",32)
   ]);
   if(!market)throw new Error("No market snapshot available");
+  const optional={
+    policy_score:{available:macro?.policy_score!=null,required_only_when:"an active policy/event claim is being used as a catalyst or risk override"},
+    credit_score:{available:macro?.credit_score!=null,required_only_when:"the conclusion depends on credit stress/easing"},
+    institutional_flow:{available:assets.some(x=>x?.institutional_flow!=null)||sectors.some(x=>x?.institutional_flow!=null),required_only_when:"a conclusion explicitly claims institutional buying/selling"},
+    onchain:{available_symbols:onchain.filter(x=>Number(x?.provider_count)>0).map(x=>x.symbol),policy:"unsupported symbols are UNAVAILABLE_NEUTRAL and must not be treated as zero/negative evidence"}
+  };
   return {
     gn_contract:{
       mode:"MONEY_FOOTPRINT_FIVE_AI_PRECHECK",
       requirement:"All five providers must independently review the current evidence bundle. No dashboard VERIFIED/ENTRY status is allowed unless the five-AI consensus gate is VERIFIED.",
-      review_order:["macro_policy","rates_fx_liquidity","asset_class_flow","sector_flow","institutional_spot","crypto_cex_dex_onchain","price_structure","candidate_sanity"]
+      review_order:["macro_policy","rates_fx_liquidity","asset_class_flow","sector_flow","institutional_spot","crypto_cex_dex_onchain","price_structure","candidate_sanity"],
+      actionable_top3_rule:"Only score>=50 AND status SCOUT/ENTRY with rank 1..3 are actionable TOP3. DETECTED/NO_CHASE are watchlist only and must not expose an entry plan.",
+      optional_evidence_policy:"Null optional fields are explicit coverage gaps, not contradictory data. They become blocking only when a conclusion materially relies on that axis. Never infer a missing value."
     },
     observed_at:new Date().toISOString(),
+    evidence_coverage:{optional},
     market,
     macro,
     asset_flows:assets,
     sector_flows:sectors,
     representatives:reps,
+    onchain,
     crypto
   };
 }
