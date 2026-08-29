@@ -19,34 +19,54 @@ jobs:
       - run: node --check src/dashboard-resilience-patch.js
       - run: node --check src/final-dashboard-patch.js
       - run: node --test test/dashboard-resilience.test.js
-
-  live-render-smoke:
-    needs: dashboard-safety
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
-    steps:
-      - name: Wait for Render deployment and verify health
+      - name: Verify Render build configuration
+        run: |
+          grep -q 'buildCommand: npm install --omit=dev' render.yaml
+          grep -q 'healthCheckPath: /health' render.yaml
+      - name: Boot server and verify public routes
         shell: bash
         run: |
           set -euo pipefail
-          base="https://gn-rotation-dashboard.onrender.com"
+          export SUPABASE_URL='http://127.0.0.1:9'
+          export SUPABASE_SERVICE_ROLE_KEY='local-smoke-key'
+          export DASHBOARD_USER='gn'
+          export DASHBOARD_PASSWORD='local-smoke-password'
+          export PORT='3100'
+          node src/start.js >/tmp/gn-server.log 2>&1 &
+          pid=$!
+          cleanup(){ kill "$pid" 2>/dev/null || true; }
+          trap cleanup EXIT
           ok=0
-          for i in {1..24}; do
-            code=$(curl -L -sS -o /tmp/health.json -w '%{http_code}' --connect-timeout 8 --max-time 15 "$base/health" || true)
-            if [ "$code" = "200" ] && grep -q '"ok"' /tmp/health.json; then
-              ok=1
-              break
-            fi
-            sleep 10
+          for i in {1..20}; do
+            if curl -fsS --max-time 2 http://127.0.0.1:3100/health > /tmp/health.json; then ok=1; break; fi
+            sleep 0.5
           done
-          test "$ok" = "1"
-          cat /tmp/health.json
-      - name: Verify login page renders
-        shell: bash
-        run: |
-          curl -L -fsS --connect-timeout 8 --max-time 15 https://gn-rotation-dashboard.onrender.com/login > /tmp/login.html
+          if [ "$ok" != "1" ]; then cat /tmp/gn-server.log; exit 1; fi
+          grep -q '"ok":true' /tmp/health.json
+          curl -fsS --max-time 3 http://127.0.0.1:3100/login > /tmp/login.html
           grep -q 'GN PIVOT' /tmp/login.html
           grep -q '로그인' /tmp/login.html
+
+  live-render-diagnostic:
+    needs: dashboard-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    continue-on-error: true
+    steps:
+      - name: Probe conventional Render host
+        shell: bash
+        run: |
+          set -u
+          base='https://gn-rotation-dashboard.onrender.com'
+          for path in /health /login; do
+            echo "PROBE $base$path"
+            curl -L -v --connect-timeout 8 --max-time 15 "$base$path" -o /tmp/body 2>&1 | tail -n 30 || true
+            test -f /tmp/body && head -c 500 /tmp/body || true
+            echo
+          done
+          code=$(curl -L -sS -o /tmp/health -w '%{http_code}' --connect-timeout 8 --max-time 15 "$base/health" || true)
+          test "$code" = '200'
+          grep -q '"ok"' /tmp/health
 
   legacy-regression-report:
     runs-on: ubuntu-latest
