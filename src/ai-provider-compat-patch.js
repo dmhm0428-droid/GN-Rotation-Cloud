@@ -1,36 +1,28 @@
 "use strict";
 
 // Runtime compatibility patch for mandatory five-AI verification.
-// xAI Responses API supports structured outputs through text.format.
-// Gemini Search grounding can return INVALID_RESPONSE when JSON MIME output is
-// forced together with google_search. Keep grounding enabled, but let the model
-// emit plain text containing the requested JSON; providers.js already extracts
-// and validates the JSON object strictly.
+// xAI: use the broadly available Chat Completions API instead of Responses
+// search-tool mode, which can return 403 when the key lacks tool entitlement.
+// Gemini: keep Search grounding, but avoid JSON MIME + search incompatibility.
 const originalFetch=global.fetch;
 if(typeof originalFetch==="function"&&!global.__gnAiProviderCompat){
   global.__gnAiProviderCompat=true;
   global.fetch=async function(input,init={}){
-    const url=typeof input==="string"?input:String(input?.url||input||"");
+    let url=typeof input==="string"?input:String(input?.url||input||"");
     if(url==="https://api.x.ai/v1/responses"&&typeof init?.body==="string"){
       try{
         const body=JSON.parse(init.body);
-        body.text={...(body.text||{}),format:{
-          type:"json_schema",
-          name:"gn_money_footprint_verification",
-          strict:true,
-          schema:{
-            type:"object",
-            properties:{
-              summary:{type:"string"},
-              sentiment:{type:"string",enum:["risk_off","neutral","risk_on"]},
-              confidence:{type:"number",minimum:0,maximum:1},
-              signals:{type:"array",items:{type:"string"}}
-            },
-            required:["summary","sentiment","confidence","signals"],
-            additionalProperties:false
-          }
-        }};
-        init={...init,body:JSON.stringify(body)};
+        const msgs=Array.isArray(body.input)?body.input.map(x=>({role:x.role||"user",content:typeof x.content==="string"?x.content:String(x.content||"")})):[];
+        const chat={
+          model:body.model,
+          messages:msgs,
+          max_tokens:Math.max(Number(body.max_output_tokens)||0,768),
+          stream:false,
+          response_format:{type:"json_object"}
+        };
+        url="https://api.x.ai/v1/chat/completions";
+        input=url;
+        init={...init,body:JSON.stringify(chat)};
       }catch{}
     }
     if(/generativelanguage\.googleapis\.com\/.+:generateContent/i.test(url)&&typeof init?.body==="string"){
