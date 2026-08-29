@@ -13,7 +13,6 @@ let assistantRetryTimer=null;
 function aiEnv(){
   const env={...process.env,AI_ANALYSIS_ENABLED:"true"};
   for(const name of PROVIDERS)env[`${name}_ENABLED`]="true";
-  // External-search providers need enough time to finish mandatory independent verification.
   if(!env.XAI_TIMEOUT_MS)env.XAI_TIMEOUT_MS="45000";
   if(!env.GEMINI_TIMEOUT_MS)env.GEMINI_TIMEOUT_MS="45000";
   env.NODE_OPTIONS=[process.env.NODE_OPTIONS,`--require=${aiProviderCompat}`].filter(Boolean).join(" ");
@@ -32,10 +31,8 @@ function runAssistant(){
   child.on("error",error=>{assistantRunning=false;console.error("GN investment assistant scheduler spawn error",error?.message||error);clearTimeout(assistantRetryTimer);assistantRetryTimer=setTimeout(runAssistant,60000);});
 }
 
-// Middleware order is intentional: scanner hygiene -> strict 5-AI fail-closed gate -> final UI.
-// dashboard-activation-hotfix inserts the legacy hero marker only on the authenticated dashboard
-// so final-dashboard-patch can render against the current base HTML.
-const preloads=["top3-policy-patch.js","strict-verification-gate-patch.js","final-dashboard-patch.js","dashboard-activation-hotfix.js"].map(x=>path.resolve(__dirname,x));
+// Keep server/API stack unchanged; resilience patch only post-processes the rendered dashboard HTML.
+const preloads=["top3-policy-patch.js","strict-verification-gate-patch.js","final-dashboard-patch.js","dashboard-activation-hotfix.js","dashboard-resilience-patch.js"].map(x=>path.resolve(__dirname,x));
 const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,...preloads.map(x=>`--require=${x}`)].filter(Boolean).join(" ")};
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
