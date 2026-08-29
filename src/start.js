@@ -46,5 +46,8 @@ const preloads=[
 const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,...preloads.map(x=>`--require=${x}`)].filter(Boolean).join(" ")};
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
-setTimeout(runAi,5000);setTimeout(runAssistant,12000);setInterval(runAi,15*60*1000).unref();setInterval(runAssistant,15*60*1000).unref();
+setTimeout(runAi,5000);setTimeout(runAssistant,12000);
+// GN validation is a live watchdog. Each runner is overlap-protected, so a
+// slow provider call never creates concurrent duplicate runs.
+setInterval(runAi,60*1000).unref();setInterval(runAssistant,60*1000).unref();
 for(const sig of ["SIGTERM","SIGINT"]){process.on(sig,()=>{clearTimeout(retryTimer);clearTimeout(assistantRetryTimer);if(!server.killed)server.kill(sig);});}
