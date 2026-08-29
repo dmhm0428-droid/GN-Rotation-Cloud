@@ -29,9 +29,13 @@ test("portfolio renderer understands exchange portfolio response",()=>{
   assert.match(patch,/보유자산 연결 오류/);
 });
 
-test("resilience patch is loaded after final dashboard renderer",()=>{
+test("resilience response patch survives final dashboard replacement",()=>{
   const finalPos=start.indexOf('final-dashboard-patch.js');
   const resiliencePos=start.indexOf('dashboard-resilience-patch.js');
   assert.ok(finalPos>=0);
-  assert.ok(resiliencePos>finalPos);
+  assert.ok(resiliencePos>=0);
+  // NODE_OPTIONS requires in list order, but Express response wrappers execute
+  // in reverse middleware order. Resilience must therefore be required BEFORE
+  // final-dashboard so its response patch runs AFTER final body replacement.
+  assert.ok(resiliencePos<finalPos);
 });
