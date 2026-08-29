@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - run: npm install --ignore-scripts
       - run: node --check src/start.js
       - run: node --check src/dashboard-resilience-patch.js
@@ -76,6 +76,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       - run: npm install --ignore-scripts
       - run: npm test
