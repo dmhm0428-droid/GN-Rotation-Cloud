@@ -20,6 +20,34 @@ jobs:
       - run: node --check src/final-dashboard-patch.js
       - run: node --test test/dashboard-resilience.test.js
 
+  live-render-smoke:
+    needs: dashboard-safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Wait for Render deployment and verify health
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://gn-rotation-dashboard.onrender.com"
+          ok=0
+          for i in {1..24}; do
+            code=$(curl -L -sS -o /tmp/health.json -w '%{http_code}' --connect-timeout 8 --max-time 15 "$base/health" || true)
+            if [ "$code" = "200" ] && grep -q '"ok"' /tmp/health.json; then
+              ok=1
+              break
+            fi
+            sleep 10
+          done
+          test "$ok" = "1"
+          cat /tmp/health.json
+      - name: Verify login page renders
+        shell: bash
+        run: |
+          curl -L -fsS --connect-timeout 8 --max-time 15 https://gn-rotation-dashboard.onrender.com/login > /tmp/login.html
+          grep -q 'GN PIVOT' /tmp/login.html
+          grep -q '로그인' /tmp/login.html
+
   legacy-regression-report:
     runs-on: ubuntu-latest
     timeout-minutes: 10
