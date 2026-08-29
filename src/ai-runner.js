@@ -18,7 +18,8 @@ async function latestBatch(db,table,limit=12){
   return data||[];
 }
 async function latestCrypto(db){
-  const {data:run}=await db.from("gn_runs").select("id,started_at,status,source_status").order("started_at",{ascending:false}).limit(1).maybeSingle();
+  const {data:runs}=await db.from("gn_runs").select("id,started_at,status,source_status").order("started_at",{ascending:false}).limit(60);
+  const run=(runs||[]).find(r=>String(r?.source_status?.source||"").includes("pre_pump_scanner"))||null;
   if(!run?.id)return {run:null,rows:[]};
   const {data}=await db.from("gn_pre_pump_snapshots").select("*").eq("run_id",run.id).order("rank",{ascending:true}).limit(3);
   return {run,rows:data||[]};
