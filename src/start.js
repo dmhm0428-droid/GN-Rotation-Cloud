@@ -32,8 +32,9 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
-// Authoritative dashboard is first so it renders LAST and removes stale/fallback UI.
+// Rotation is loaded before authoritative so it renders after authoritative output.
 const preloads=[
+  "dashboard-rotation-v1.js",
   "dashboard-authoritative-v1.js",
   "dashboard-live-summary-patch.js",
   "top3-policy-patch.js",
