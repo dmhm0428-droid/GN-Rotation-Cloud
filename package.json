@@ -11,7 +11,7 @@
     "collector": "node src/collector.js",
     "pre-pump": "node src/upbit-pre-pump-runner.js",
     "start": "node src/start.js",
-    "test": "node --test --test-isolation=none"
+    "test": "node --test"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
