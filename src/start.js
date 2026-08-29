@@ -33,8 +33,9 @@ function runAssistant(){
 }
 
 // Middleware order is intentional: scanner hygiene -> strict 5-AI fail-closed gate -> final UI.
-// The action dashboard must never expose ENTRY/SCOUT before the latest five-AI consensus is VERIFIED.
-const preloads=["top3-policy-patch.js","strict-verification-gate-patch.js","final-dashboard-patch.js"].map(x=>path.resolve(__dirname,x));
+// dashboard-activation-hotfix inserts the legacy hero marker only on the authenticated dashboard
+// so final-dashboard-patch can render against the current base HTML.
+const preloads=["top3-policy-patch.js","strict-verification-gate-patch.js","final-dashboard-patch.js","dashboard-activation-hotfix.js"].map(x=>path.resolve(__dirname,x));
 const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,...preloads.map(x=>`--require=${x}`)].filter(Boolean).join(" ")};
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
