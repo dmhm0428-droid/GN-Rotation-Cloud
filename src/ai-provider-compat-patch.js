@@ -2,7 +2,10 @@
 
 // Runtime compatibility patch for mandatory five-AI verification.
 // xAI Responses API supports structured outputs through text.format.
-// Force the GN audit schema so web/X tool calls still finish as parseable JSON.
+// Gemini Search grounding can return INVALID_RESPONSE when JSON MIME output is
+// forced together with google_search. Keep grounding enabled, but let the model
+// emit plain text containing the requested JSON; providers.js already extracts
+// and validates the JSON object strictly.
 const originalFetch=global.fetch;
 if(typeof originalFetch==="function"&&!global.__gnAiProviderCompat){
   global.__gnAiProviderCompat=true;
@@ -27,6 +30,17 @@ if(typeof originalFetch==="function"&&!global.__gnAiProviderCompat){
             additionalProperties:false
           }
         }};
+        init={...init,body:JSON.stringify(body)};
+      }catch{}
+    }
+    if(/generativelanguage\.googleapis\.com\/.+:generateContent/i.test(url)&&typeof init?.body==="string"){
+      try{
+        const body=JSON.parse(init.body);
+        const hasGoogleSearch=Array.isArray(body?.tools)&&body.tools.some(t=>t&&typeof t==="object"&&t.google_search);
+        if(hasGoogleSearch&&body?.generationConfig){
+          delete body.generationConfig.responseMimeType;
+          body.generationConfig.maxOutputTokens=Math.max(Number(body.generationConfig.maxOutputTokens)||0,1024);
+        }
         init={...init,body:JSON.stringify(body)};
       }catch{}
     }
