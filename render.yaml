@@ -19,27 +19,29 @@ services:
       - key: DASHBOARD_PASSWORD
         generateValue: true
       - key: AI_ANALYSIS_ENABLED
-        value: "true"
+        value: "false"
+      - key: AI_PAID_REQUESTS_ENABLED
+        value: "false"
       - key: AI_MAX_COST_USD_PER_RUN
         value: "0.05"
       - key: PERPLEXITY_ENABLED
-        value: "true"
+        value: "false"
       - key: PERPLEXITY_API_KEY
         sync: false
       - key: XAI_ENABLED
-        value: "true"
+        value: "false"
       - key: XAI_API_KEY
         sync: false
       - key: DEEPSEEK_ENABLED
-        value: "true"
+        value: "false"
       - key: DEEPSEEK_API_KEY
         sync: false
       - key: ANTHROPIC_ENABLED
-        value: "true"
+        value: "false"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: GEMINI_ENABLED
-        value: "true"
+        value: "false"
       - key: GEMINI_API_KEY
         sync: false
 
@@ -58,32 +60,34 @@ services:
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: AI_ANALYSIS_ENABLED
-        value: "true"
+        value: "false"
+      - key: AI_PAID_REQUESTS_ENABLED
+        value: "false"
       - key: AI_MAX_COST_USD_PER_RUN
         value: "0.05"
       - key: PERPLEXITY_ENABLED
-        value: "true"
+        value: "false"
       - key: PERPLEXITY_API_KEY
         sync: false
       - key: XAI_ENABLED
-        value: "true"
+        value: "false"
       - key: XAI_API_KEY
         sync: false
       - key: DEEPSEEK_ENABLED
-        value: "true"
+        value: "false"
       - key: DEEPSEEK_API_KEY
         sync: false
       - key: ANTHROPIC_ENABLED
-        value: "true"
+        value: "false"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: GEMINI_ENABLED
-        value: "true"
+        value: "false"
       - key: GEMINI_API_KEY
         sync: false
 
 # Market and Pre-Pump collection are scheduled canonically in Supabase:
 # - gn_market_collector_5m
 # - gn_pre_pump_scanner_15m
-# The dedicated Render cron above reads the latest canonical snapshot only;
-# it never overwrites collector output.
+# Paid multi-AI verification is fail-closed and disabled by default.
+# Re-enabling requires BOTH AI_ANALYSIS_ENABLED=true and AI_PAID_REQUESTS_ENABLED=true.
