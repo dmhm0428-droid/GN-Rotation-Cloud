@@ -63,8 +63,20 @@ function recursiveText(node,out=[]){
   }
   return out;
 }
+function xaiResponseText(body){
+  if(typeof body?.output_text==="string"&&body.output_text.trim())return body.output_text;
+  const texts=[];
+  for(const item of Array.isArray(body?.output)?body.output:[]){
+    if(item?.type!=="message"&&!Array.isArray(item?.content))continue;
+    for(const part of Array.isArray(item?.content)?item.content:[]){
+      if((part?.type==="output_text"||part?.type==="text")&&typeof part?.text==="string"&&part.text.trim())texts.push(part.text);
+    }
+  }
+  if(texts.length)return texts.join("\n");
+  return recursiveText(body,[]).filter((x,i,a)=>a.indexOf(x)===i).join("\n");
+}
 function responseText(provider,body){
-  if(provider.name==="xai")return recursiveText(body,[]).filter((x,i,a)=>a.indexOf(x)===i).join("\n");
+  if(provider.name==="xai")return xaiResponseText(body);
   if(provider.kind==="anthropic")return body?.content?.filter(x=>x?.type==="text").map(x=>x.text||"").join("");
   if(provider.kind==="gemini")return body?.candidates?.[0]?.content?.parts?.filter(x=>!x?.thought).map(x=>x?.text||"").join("");
   return body?.choices?.[0]?.message?.content;
