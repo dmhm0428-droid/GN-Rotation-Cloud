@@ -32,9 +32,11 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
+// Live metals is loaded first so its script injection stays independent of the existing drilldown patch.
 // Drilldown is loaded before rotation so the final HTML contains the rotation block first,
 // followed by the external drilldown script. This avoids inline-script leakage into the page.
 const preloads=[
+  "dashboard-metals-live-v1.js",
   "dashboard-rotation-drilldown-v2.js",
   "dashboard-rotation-v1.js",
   "dashboard-authoritative-v1.js",
