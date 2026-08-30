@@ -1,103 +1,67 @@
 "use strict";
 
+process.env.GN_TOP3_LIVE_ENABLED="true";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {createLatestPrePumpHandler,loadLatestPrePump}=require("../src/pre-pump-dashboard");
+const {continuityState,hardValidated,signalApproved}=require("../src/pre-pump-dashboard");
 
-function chain(result){
-  const query={
-    select(){return query;},
-    order(){return query;},
-    limit(){return query;},
-    eq(){return query;},
-    maybeSingle:async()=>result,
-    then(resolve){return Promise.resolve(result).then(resolve);}
-  };
-  return query;
-}
-
-function mockDb({latest,rows,marketRows,latestError,rowsError,marketError}={}){
-  let prePumpCalls=0;
+function approved(overrides={}){
+  const now=new Date().toISOString();
   return {
-    from(table){
-      if(table==="gn_pre_pump_snapshots"){
-        prePumpCalls+=1;
-        if(prePumpCalls===1)return chain({data:latest||null,error:latestError||null});
-        return chain({data:rows||[],error:rowsError||null});
-      }
-      if(table==="gn_market_snapshots")return chain({data:marketRows||[],error:marketError||null});
-      throw new Error(`unexpected table ${table}`);
-    }
-  };
-}
-
-function row({rank,market,score,status="ENTRY",r5=.01,r15=.02,late=false,blocked=false}){
-  return {
-    rank,market,score,status,
-    return5m:r5,return15m:r15,volume_ratio15m:1.2,krw_price:1000,
+    rank:1,market:"KRW-AAA",score:80,status:"ENTRY",krw_price:100,
+    recommended_entry_krw:100,recommended_entry_low:98,recommended_entry_high:102,ts:now,
     details:{
-      market_context:{marketScore:61,warOverride:false},
-      late_pump:late?{latePumpRisk:true}:null,
-      orderbook:blocked?{entry_blocked:true,signal:"ASK_WALL"}:{entry_blocked:false,signal:"BID_DEFENSE"},
-      daily_ignition:{available:true,score:60}
+      entry_allowed:true,five_ai_gate_ok:true,quality_ok:true,entry_sanity_ok:true,
+      global_spot_ok:true,multi_exchange_ok:true,onchain_ok:true,derivatives_ok:true,
+      multi_timeframe_ok:true,cumulative_flow_ok:true,support_resistance_ok:true,
+      risk_reward_ok:true,market_block:false,no_chase:false
     },
-    ts:"2026-08-24T03:00:00Z"
+    ...overrides
   };
 }
 
-test("TOP3 contains at most three current entry candidates in priority order",async()=>{
-  const db=mockDb({
-    latest:{run_id:"run-latest",ts:"2026-08-24T03:00:00Z"},
-    marketRows:[{market_score:61},{market_score:60},{market_score:59},{market_score:58}],
-    rows:[
-      row({rank:1,market:"KRW-A",score:80}),
-      row({rank:2,market:"KRW-B",score:76}),
-      row({rank:3,market:"KRW-C",score:72}),
-      row({rank:4,market:"KRW-D",score:70})
-    ]
-  });
-  const result=await loadLatestPrePump(db);
-  assert.equal(result.length,3);
-  assert.deepEqual(result.map(x=>x.market),["KRW-A","KRW-B","KRW-C"]);
-  assert.deepEqual(result.map(x=>x.rank),[1,2,3]);
-  assert.ok(result.every(x=>x.action==="진입"));
+test("first ENTRY remains strict and fail-closed",()=>{
+  assert.equal(hardValidated(approved()),true);
+  assert.equal(hardValidated(approved({score:74})),false);
+  assert.equal(hardValidated(approved({krw_price:104})),false);
+  const bad=approved();bad.details={...bad.details,onchain_ok:false};
+  assert.equal(hardValidated(bad),false);
 });
 
-test("TOP3 excludes overheat, late-pump and non-entry scanner states",async()=>{
-  const db=mockDb({
-    latest:{run_id:"run-latest",ts:"2026-08-24T03:00:00Z"},
-    marketRows:[{market_score:61},{market_score:61}],
-    rows:[
-      row({rank:1,market:"KRW-HOT",score:85}),
-      row({rank:2,market:"KRW-LATE",score:80,late:true}),
-      row({rank:3,market:"KRW-HOLD",score:79,status:"HOLD"}),
-      row({rank:4,market:"KRW-OK",score:78})
-    ]
-  });
-  const result=await loadLatestPrePump(db);
-  assert.deepEqual(result.map(x=>x.market),["KRW-OK"]);
+test("historical approved signal can be tracked after the 20 minute entry window",()=>{
+  const old=approved({ts:new Date(Date.now()-60*60*1000).toISOString()});
+  assert.equal(hardValidated(old),false);
+  assert.equal(signalApproved(old,{checkAge:false}),true);
 });
 
-test("orderbook-blocked candidate is clearly marked entry-wait, never sell/holding",async()=>{
-  const db=mockDb({
-    latest:{run_id:"run-latest",ts:"2026-08-24T03:00:00Z"},
-    marketRows:[{market_score:61},{market_score:61}],
-    rows:[row({rank:1,market:"KRW-WAIT",score:79,blocked:true})]
-  });
-  const result=await loadLatestPrePump(db);
-  assert.equal(result.length,1);
-  assert.equal(result[0].action,"진입대기");
-  assert.equal(result[0].rank,1);
+test("approved signal repeats as entry-maintain while price stays in band",()=>{
+  const signal=approved();
+  const current={...signal,score:78,krw_price:101,ts:new Date().toISOString()};
+  const state=continuityState({signal,current,market:{score:61,delta:4},repeatCount:3});
+  assert.equal(state.action,"진입유지");
+  assert.equal(state.newEntryAllowed,true);
+  assert.equal(state.repeatCount,3);
 });
 
-test("returns an empty list when scanner data does not exist",async()=>{
-  assert.deepEqual(await loadLatestPrePump(mockDb()),[]);
+test("breakout does not disappear; it becomes breakout-hold and blocks fresh chasing",()=>{
+  const signal=approved();
+  const current={...signal,score:79,status:"SCOUT",krw_price:108,ts:new Date().toISOString()};
+  const state=continuityState({signal,current,market:{score:66,delta:5},repeatCount:4});
+  assert.equal(state.action,"돌파보유");
+  assert.equal(state.newEntryAllowed,false);
 });
 
-test("handler contains mocked database errors",async()=>{
-  const handler=createLatestPrePumpHandler({db:{},load:async()=>{throw new Error("mock database failure");}});
-  const response={code:null,body:null,status(code){this.code=code;return this;},json(body){this.body=body;return this;}};
-  await handler({},response);
-  assert.equal(response.code,500);
-  assert.deepEqual(response.body,{error:"mock database failure"});
+test("NO_CHASE after an approved entry becomes sell-preparation, not silent disappearance",()=>{
+  const signal=approved();
+  const current={...signal,status:"NO_CHASE",krw_price:110,ts:new Date().toISOString()};
+  const state=continuityState({signal,current,market:{score:64,delta:2},repeatCount:5});
+  assert.equal(state.action,"매도준비");
+  assert.equal(state.newEntryAllowed,false);
+});
+
+test("market or score deterioration keeps the position visible as holding-review",()=>{
+  const signal=approved();
+  const current={...signal,score:66,krw_price:100,ts:new Date().toISOString()};
+  const state=continuityState({signal,current,market:{score:43,delta:-11},repeatCount:4});
+  assert.equal(state.action,"보유점검");
 });
