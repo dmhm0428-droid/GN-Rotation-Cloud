@@ -180,7 +180,7 @@ async function loadLatestPrePump(db){
     seen.add(marketName);
   }
 
-  const priority={"진입":0,"진입유지":1,"돌파보유":2,"보유":3,"보유점검":4,"매도준비":5};
+  const priority={"매도준비":0,"진입":1,"진입유지":2,"돌파보유":3,"보유점검":4,"보유":5};
   return output.sort((a,b)=>(priority[a.action]??9)-(priority[b.action]??9)||Number(b.score)-Number(a.score)).slice(0,10).map((r,i)=>({...r,rank:i+1}));
 }
 
