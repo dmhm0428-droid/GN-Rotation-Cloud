@@ -47,7 +47,7 @@ test("ranks early positive candidates and excludes already-pumped coins",()=>{
   assert.deepEqual(ranked.map(row=>row.market),["KRW-A"]);
 });
 
-test("scans every KRW market with injected quotation responses and no order API",async()=>{
+test("scans every KRW market across quotation timeframes and never touches order API",async()=>{
   const requested=[];
   const fetchImpl=async url=>{
     requested.push(url);
@@ -57,7 +57,11 @@ test("scans every KRW market with injected quotation responses and no order API"
     return {ok:true,status:200,json:async()=>body};
   };
   const result=await scanPrePump({fetchImpl,sleep:async()=>{},batchSize:8});
-  assert.equal(requested.filter(url=>url.includes("/candles/")).length,2);
+  const candleRequests=requested.filter(url=>url.includes("/candles/"));
+  assert.ok(candleRequests.length>=2);
+  assert.ok(candleRequests.some(url=>url.includes("KRW-AAA")));
+  assert.ok(candleRequests.some(url=>url.includes("KRW-CCC")));
+  assert.ok(!candleRequests.some(url=>url.includes("BTC-BBB")));
   assert.ok(requested.every(url=>!url.includes("/orders")));
   assert.deepEqual(result.map(row=>row.market),["KRW-AAA"]);
 });
