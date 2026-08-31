@@ -32,9 +32,9 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
-// Precursor TOP3 is loaded first so its final display layer runs after every legacy dashboard renderer.
-// Live metals then stays independent of the existing drilldown patch.
+// Big-picture is loaded first so macro/MVRV stays above coin-level TOP3 and legacy renderers.
 const preloads=[
+  "dashboard-big-picture-v1.js",
   "dashboard-precursor-top3-v1.js",
   "dashboard-metals-live-v1.js",
   "dashboard-rotation-drilldown-v2.js",
