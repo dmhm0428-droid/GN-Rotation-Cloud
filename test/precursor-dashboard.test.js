@@ -11,18 +11,23 @@ test("persistence buckets separate single, repeat2, repeat3+",()=>{
   assert.equal(persistenceBucket(8),"REPEAT_3_PLUS");
 });
 
-test("confirmed repeat is a monitoring signal, never an automatic buy",()=>{
+test("confirmed repeat is observation only without empirical qualification",()=>{
   const stage=stageMeta("CONFIRMED_REPEAT_3",3);
-  const a=actionFor({entryAllowed:false,status:"SCOUT",stage,repeat:3,expansion:{score:100,globalSpotOk:true,derivativesOk:true}});
+  const a=actionFor({strictEntry:false,recommendationEligible:false,leadCore:false,lagging:false,repeat:3});
   assert.equal(stage.label,"반복확정 3+");
-  assert.equal(a.text,"우선감시");
+  assert.equal(a.text,"반복 관찰");
   assert.equal(a.observationOnly,true);
 });
 
-test("ENTRY requires explicit entry_allowed before display can say entry verification",()=>{
-  const stage=stageMeta("CONFIRMED_REPEAT_3",4);
-  assert.equal(actionFor({entryAllowed:false,status:"ENTRY",stage,repeat:4,expansion:{score:100,globalSpotOk:true,derivativesOk:true}}).text,"우선감시");
-  assert.equal(actionFor({entryAllowed:true,status:"ENTRY",stage,repeat:4,expansion:{score:100,globalSpotOk:true,derivativesOk:true}}).text,"진입검증");
+test("ENTRY requires explicit strict entry validation",()=>{
+  assert.equal(actionFor({strictEntry:false,recommendationEligible:false,leadCore:false,lagging:false,repeat:4}).text,"반복 관찰");
+  assert.equal(actionFor({strictEntry:true,recommendationEligible:true,leadCore:true,lagging:false,repeat:4}).text,"ENTRY 검증통과");
+});
+
+test("empirical recommendation remains observation until ENTRY gate passes",()=>{
+  const a=actionFor({strictEntry:false,recommendationEligible:true,leadCore:true,lagging:false,repeat:2});
+  assert.equal(a.text,"추천검증 후보");
+  assert.equal(a.observationOnly,true);
 });
 
 test("current episode is matched to first-detection anchor, not stale prior episode",()=>{
@@ -54,7 +59,8 @@ test("row mapping exposes repeat, expansion, MA and post-validation without chan
   assert.equal(out.maScore,71);
   assert.equal(out.postValidation.ret15m,1);
   assert.equal(out.validationStats.hit3h5Pct,40);
-  assert.equal(out.precursorAction,"반복감시");
+  assert.equal(out.precursorAction,"반복 관찰");
+  assert.equal(out.recommendationEligible,false);
   assert.equal(out.observationOnly,true);
   assert.equal(out.riseSinceFirstPct,5);
 });
