@@ -5,17 +5,42 @@ const {createClient}=require("@supabase/supabase-js");
 const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
 
 const num=v=>Number.isFinite(Number(v))?Number(v):null;
+let mvrvCache={at:0,data:null};
+async function fetchJson(url,timeout=8000){
+  const c=new AbortController(),timer=setTimeout(()=>c.abort(),timeout);
+  try{
+    const r=await fetch(url,{signal:c.signal,headers:{accept:"application/json","user-agent":"GN-PIVOT-MVRV/2.0"}});
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  }finally{clearTimeout(timer);}
+}
+function freshEnough(asOf,maxDays=3){
+  if(!asOf)return false;
+  const t=new Date(asOf).getTime();
+  return Number.isFinite(t)&&Date.now()-t<=maxDays*86400000;
+}
+function rowFrom(payload){
+  if(Array.isArray(payload))return payload.at(-1)||{};
+  if(Array.isArray(payload?.data))return payload.data.at(-1)||{};
+  return payload?.data&&typeof payload.data==="object"?payload.data:(payload||{});
+}
 async function btcMvrv(){
-  const c=new AbortController(),timer=setTimeout(()=>c.abort(),8000);
+  if(mvrvCache.data&&Date.now()-mvrvCache.at<4*3600000)return mvrvCache.data;
+  const errors=[];
+  try{
+    const j=await fetchJson("https://bitcoin-data.com/v1/mvrv/last"),row=rowFrom(j),v=num(row.mvrv??row.value),asOf=row.d||row.date||row.time||row.timestamp||null;
+    if(v==null)throw new Error("value unavailable");
+    if(!freshEnough(asOf,3))throw new Error(`stale ${asOf||"unknown"}`);
+    const data={value:v,asOf,source:"BGeometrics MVRV",fresh:true,error:null};mvrvCache={at:Date.now(),data};return data;
+  }catch(e){errors.push(`BGeometrics:${String(e?.message||e)}`);}
   try{
     const url="https://community-api.coinmetrics.io/v4/timeseries/asset-metrics?assets=btc&metrics=CapMVRVCur&frequency=1d&page_size=2&paging_from=end";
-    const r=await fetch(url,{signal:c.signal,headers:{accept:"application/json","user-agent":"GN-PIVOT-MVRV/1.0"}});
-    if(!r.ok)throw new Error(`HTTP ${r.status}`);
-    const j=await r.json(),rows=(j?.data||[]).slice().sort((a,b)=>String(b.time).localeCompare(String(a.time)));
-    const row=rows[0]||{},v=num(row.CapMVRVCur);
-    return {value:v,asOf:row.time||null,source:"Coin Metrics CapMVRVCur",error:v==null?"MVRV unavailable":null};
-  }catch(e){return {value:null,asOf:null,source:"Coin Metrics CapMVRVCur",error:String(e?.message||e)};}
-  finally{clearTimeout(timer);}
+    const j=await fetchJson(url),rows=(j?.data||[]).slice().sort((a,b)=>String(a.time).localeCompare(String(b.time))),row=rows.at(-1)||{},v=num(row.CapMVRVCur),asOf=row.time||null;
+    if(v==null)throw new Error("value unavailable");
+    if(!freshEnough(asOf,3))throw new Error(`stale ${asOf||"unknown"}`);
+    const data={value:v,asOf,source:"Coin Metrics CapMVRVCur",fresh:true,error:null};mvrvCache={at:Date.now(),data};return data;
+  }catch(e){errors.push(`CoinMetrics:${String(e?.message||e)}`);}
+  const data={value:null,asOf:null,source:"BGeometrics + Coin Metrics",fresh:false,error:errors.join(" | ")};mvrvCache={at:Date.now(),data};return data;
 }
 function footprintState(score){
   if(score==null)return "데이터대기";
@@ -24,8 +49,8 @@ function footprintState(score){
   if(score>=40)return "주의";
   return "위험회피";
 }
-function mvrvState(v,footprint){
-  if(v==null)return {signal:"DATA_WAIT",label:"MVRV 데이터대기",guide:"데이터 확인 전 신호 없음"};
+function mvrvState(v,footprint,fresh){
+  if(v==null||fresh!==true)return {signal:"DATA_WAIT",label:"MVRV 데이터대기",guide:"최신값 검증 전 신호 없음"};
   if(v<1){
     const risk=footprint!=null&&footprint<50;
     return {signal:"BUY_SIGNAL",label:"BTC 매수신호",guide:risk?"MVRV<1 가치구간 · 큰그림 약세라 분할/대기 우선":"MVRV<1 가치구간 · 큰그림 확인 후 매수우위"};
@@ -42,7 +67,7 @@ async function bigPicture(req,res){
       btcMvrv()
     ]);
     const market=marketR.data||null,macro=macroR.data||null,overlay=overlayR.data||null;
-    const footprint=num(market?.market_score),mv=mvrvState(mvrv.value,footprint);
+    const footprint=num(market?.market_score),mv=mvrvState(mvrv.value,footprint,mvrv.fresh);
     res.set("Cache-Control","no-store");
     res.json({ts:new Date().toISOString(),footprint,footprintState:footprintState(footprint),market,macro,mvrv:{...mvrv,...mv},events:overlay?.events?.GLOBAL||null,eventUpdatedAt:overlay?.updated_at||null,mode:"BIG_PICTURE_FIRST"});
   }catch(e){res.status(500).json({error:String(e?.message||e)});}
