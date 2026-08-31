@@ -17,6 +17,8 @@ jobs:
       - run: npm install --ignore-scripts
       - run: node --check src/start.js
       - run: node --check src/dashboard-big-picture-v1.js
+      - run: node --check src/precursor-dashboard.js
+      - run: node --check src/dashboard-precursor-top3-v1.js
       - run: node --check src/dashboard-resilience-patch.js
       - run: node --check src/dashboard-hard-rescue.js
       - run: node --check src/final-dashboard-patch.js
