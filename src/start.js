@@ -32,20 +32,19 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
-// Leading TOP3 is loaded first so it is the final authoritative crypto layer:
-// precursor candidates survive; immediate-entry/5AI only upgrades a candidate to ENTRY.
+// Crypto TOP3 UI has ONE owner only: dashboard-leading-top3-v2.
+// Legacy crypto UI layers (immediate-entry-v2 / precursor-top3-v1 / top3-policy / strict 5AI gate)
+// are intentionally not preloaded because their browser MutationObservers/fetch wrappers race each
+// other and make the cards/status flicker. Current scanner V69 already persists row-level
+// SCOUT/ENTRY + entry_allowed, and leading-top3-v2 reads/revalidates those canonical DB rows.
 const preloads=[
   "dashboard-leading-top3-v2.js",
-  "dashboard-immediate-entry-v2.js",
   "dashboard-big-picture-v1.js",
-  "dashboard-precursor-top3-v1.js",
   "dashboard-metals-live-v1.js",
   "dashboard-rotation-drilldown-v2.js",
   "dashboard-rotation-v1.js",
   "dashboard-authoritative-v1.js",
   "dashboard-live-summary-patch.js",
-  "top3-policy-patch.js",
-  "strict-verification-gate-patch.js",
   "dashboard-resilience-patch.js",
   "dashboard-runtime-hotfix.js",
   "dashboard-hard-rescue.js",
