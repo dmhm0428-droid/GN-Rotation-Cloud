@@ -11,8 +11,19 @@ const {selectLeadingTop3}=require("./leading-top3-policy");
 const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
 
 const FRESH_MS=12*60*1000;
-const POOL_SIZE=12;
-const POLICY="TOP3=폭발 전 선행후보. 최신 스캔 상위 12개를 재검증해 후행/과열을 제거한 뒤 선행점수 상위 3개를 표시. 5AI는 TOP3 삭제 조건이 아니라 ENTRY 승격 조건.";
+const HISTORY_MS=30*60*1000;
+const HISTORY_LIMIT=120;
+const POLICY="TOP3=폭발 전 선행후보. 최신 스캔 하나의 1~3위에 갇히지 않고 최근 30분 후보군의 종목별 최신 상태를 재검증해 후행·과열·20분 미재등장을 제거한 뒤 선행점수 상위 3개를 표시. 5AI는 TOP3 삭제 조건이 아니라 ENTRY 승격 조건.";
+
+function latestByMarket(rows){
+  const seen=new Set(),out=[];
+  for(const row of Array.isArray(rows)?rows:[]){
+    const market=String(row?.market||"");
+    if(!market||seen.has(market))continue;
+    seen.add(market);out.push(row);
+  }
+  return out;
+}
 
 async function loadBroadRadar(){
   const latest=await db.from("gn_pre_pump_snapshots").select("ts").order("ts",{ascending:false}).limit(1).maybeSingle();
@@ -22,9 +33,11 @@ async function loadBroadRadar(){
   const age=Date.now()-new Date(ts).getTime();
   if(!Number.isFinite(age)||age<0||age>FRESH_MS)return {updatedAt:ts,stale:true,rows:[],nearMiss:[]};
 
-  const pool=await db.from("gn_pre_pump_snapshots").select("*").eq("ts",ts).lte("rank",POOL_SIZE).order("rank",{ascending:true});
+  const historyCutoff=new Date(Date.now()-HISTORY_MS).toISOString();
+  const pool=await db.from("gn_pre_pump_snapshots").select("*").gte("ts",historyCutoff).order("ts",{ascending:false}).order("rank",{ascending:true}).limit(HISTORY_LIMIT);
   if(pool.error)throw pool.error;
-  const markets=(pool.data||[]).map(x=>x.market).filter(Boolean);
+  const latestRows=latestByMarket(pool.data||[]);
+  const markets=latestRows.map(x=>x.market).filter(Boolean);
   let outcomes=[],summary=[],readiness=[];
   if(markets.length){
     const cutoff=new Date(Date.now()-8*3600*1000).toISOString();
@@ -39,7 +52,13 @@ async function loadBroadRadar(){
   if(!val.error)summary=val.data||[];
   const summaryMap=new Map(summary.map(x=>[x.persistence_bucket,x]));
   const readinessMap=new Map(readiness.map(x=>[x.market,x]));
-  const mapped=(pool.data||[]).map(r=>mapRow(r,outcomes,summaryMap,readinessMap)).map(r=>({...r,entryAllowed:false,strictImmediate:false}));
+  const now=Date.now();
+  const mapped=latestRows.map(raw=>{
+    const r=mapRow(raw,outcomes,summaryMap,readinessMap);
+    const rowTs=new Date(raw.ts||0).getTime();
+    const candidateAgeMin=Number.isFinite(rowTs)?Math.max(0,(now-rowTs)/60000):null;
+    return {...r,candidateAgeMin:candidateAgeMin==null?null:+candidateAgeMin.toFixed(1),entryAllowed:false,strictImmediate:false};
+  });
   const selected=selectLeadingTop3(mapped);
   return {updatedAt:ts,stale:false,rows:selected.top3,nearMiss:selected.nearMiss,poolSize:mapped.length};
 }
@@ -51,7 +70,7 @@ function mergeImmediate(leading,body){
     const im=imap.get(String(r.market||""));
     if(!im)return {...r,entryAllowed:false,strictImmediate:false};
     return {...r,...im,
-      top3Stage:"ENTRY",entryAllowed:true,strictImmediate:true,
+      top3Stage:"ENTRY",entryAllowed:true,strictImmediate:true,candidateAgeMin:r.candidateAgeMin,
       missingLeadConditions:r.missingLeadConditions||[],lagReasons:[],isLagging:false,
       firstDetectedAt:r.firstDetectedAt||im.firstDetectedAt,firstDetectedPrice:r.firstDetectedPrice??im.firstDetectedPrice,
       currentPrice:im.currentPrice??r.currentPrice,mechanicalScore:im.mechanicalScore??r.mechanicalScore,
@@ -61,7 +80,7 @@ function mergeImmediate(leading,body){
   const seen=new Set(merged.map(r=>String(r.market||"")));
   for(const im of immediate){
     const key=String(im.market||"");if(!key||seen.has(key))continue;
-    merged.unshift({...im,top3Stage:"ENTRY",entryAllowed:true,strictImmediate:true,missingLeadConditions:[],lagReasons:[],isLagging:false});seen.add(key);
+    merged.unshift({...im,top3Stage:"ENTRY",entryAllowed:true,strictImmediate:true,candidateAgeMin:0,missingLeadConditions:[],lagReasons:[],isLagging:false});seen.add(key);
   }
   const selected=selectLeadingTop3(merged);
   return {...leading,rows:selected.top3,nearMiss:leading.nearMiss||[]};
@@ -97,8 +116,8 @@ const SCRIPT=`<script id="gn-leading-top3-v2-ui">(function(){
  function pct(v){var x=n(v);return x==null?'--':(x>=0?'+':'')+x.toFixed(2)+'%'}
  function tm(v){if(!v)return '--';var d=new Date(v);return isNaN(d)?'--':d.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false})}
  function stage(r){if(r.strictImmediate===true)return {key:'entry',label:'ENTRY',action:'진입검증 완료'};if(r.recommendationEligible===true)return {key:'validated',label:'검증후보',action:'진입 검증중'};if(r.empiricalValidation&&r.empiricalValidation.lead_core===true)return {key:'lead',label:'선행포착',action:'선행 감시'};return {key:'scout',label:'SCOUT',action:'전조 추적'}}
- function card(r,i,near){var s=stage(r),missing=Array.isArray(r.missingLeadConditions)?r.missingLeadConditions:[],lag=Array.isArray(r.lagReasons)?r.lagReasons:[];var first=r.firstDetectedPrice!=null?nf(r.firstDetectedPrice)+'원':'--';var now=r.currentPrice!=null?nf(r.currentPrice)+'원':'--';var price='현재 '+now+' · 최초 '+tm(r.firstDetectedAt)+' '+first+(r.riseSinceFirstPct!=null?' · 최초후 '+pct(r.riseSinceFirstPct):'');if(r.strictImmediate===true&&r.entryLow!=null)price+=' · 진입 '+nf(r.entryLow)+'~'+nf(r.entryHigh)+'원';var metrics='선행점수 '+nf(r.top3LeadScore)+' · 기계 '+nf(r.mechanicalScore)+' · MA정렬 '+nf(r.maAlignment)+'% · MA20 '+nf(r.ma20Slope)+' · OBV1H '+nf(r.obv1h)+' · 5분가속 '+nf(r.volumeAccel5m)+'배 · 반복 '+nf(r.repeatCount)+'회';var miss=(near?lag.concat(missing):missing).slice(0,3);return '<article class="gnLeadCard '+(near?'gnNear':'')+'" data-gn-leading-card="1"><div class="gnLeadRank">'+(i+1)+'</div><div><div class="gnLeadName">'+esc(String(r.market||'').replace('KRW-',''))+'<span class="gnLeadStage '+s.key+'">'+s.label+'</span></div><div class="gnLeadPrice">'+price+'</div><div class="gnLeadMetrics">'+metrics+'</div>'+(miss.length?'<div class="gnLeadMissing">남은 조건 · '+esc(miss.join(' · '))+'</div>':'')+'</div><div class="gnLeadAction '+s.key+'">'+s.action+'</div></article>'}
- function render(){if(rendering||!payload)return;var box=document.getElementById('top3');if(!box)return;rendering=true;try{var rows=Array.isArray(payload.cryptoRadar)?payload.cryptoRadar:[],near=Array.isArray(payload.cryptoNearMiss)?payload.cryptoNearMiss:[];if(payload.precursorStale===true)box.innerHTML='<div class="empty">데이터 지연 · TOP3 판정 보류</div>';else if(rows.length)box.innerHTML=rows.slice(0,3).map(function(r,i){return card(r,i,false)}).join('')+'<div class="gnPolicyNote">TOP3는 이미 오른 종목이 아니라 돈 유입·구조 형성·과열 전 후보. 5AI는 ENTRY 승격에만 사용.</div>';else if(near.length)box.innerHTML='<div class="empty">현재 선행 TOP3 통과 종목 없음</div><div class="gnNearTitle">TOP3 직전 후보 · 부족 조건 표시</div>'+near.slice(0,3).map(function(r,i){return card(r,i,true)}).join('');else box.innerHTML='<div class="empty">현재 전조 후보 없음</div>';var sec=box.closest('section');if(sec){var t=sec.querySelector('.sectionTitle'),sub=sec.querySelector('.sub');if(t)t.textContent='크립토 선행 TOP3 · 폭발 전 후보';if(sub)sub.textContent='돈 유입 시작 + 구조 형성 + 과열 전 · 12개 후보 재검증 → 후행 제거 → 상위 3개 · 5AI는 ENTRY 승격용';}var pill=document.getElementById('cryptoState');if(pill){var en=rows.filter(function(r){return r.strictImmediate===true}).length,lead=rows.filter(function(r){return r.empiricalValidation&&r.empiricalValidation.lead_core===true}).length;pill.textContent='TOP3 '+rows.length+' · 선행 '+lead+' · ENTRY '+en;}}finally{setTimeout(function(){rendering=false},0)}}
+ function card(r,i,near){var s=stage(r),missing=Array.isArray(r.missingLeadConditions)?r.missingLeadConditions:[],lag=Array.isArray(r.lagReasons)?r.lagReasons:[];var first=r.firstDetectedPrice!=null?nf(r.firstDetectedPrice)+'원':'--';var now=r.currentPrice!=null?nf(r.currentPrice)+'원':'--';var price='현재 '+now+' · 최초 '+tm(r.firstDetectedAt)+' '+first+(r.riseSinceFirstPct!=null?' · 최초후 '+pct(r.riseSinceFirstPct):'');if(r.strictImmediate===true&&r.entryLow!=null)price+=' · 진입 '+nf(r.entryLow)+'~'+nf(r.entryHigh)+'원';var metrics='선행점수 '+nf(r.top3LeadScore)+' · 기계 '+nf(r.mechanicalScore)+' · MA정렬 '+nf(r.maAlignment)+'% · MA20 '+nf(r.ma20Slope)+' · OBV1H '+nf(r.obv1h)+' · 5분가속 '+nf(r.volumeAccel5m)+'배 · 반복 '+nf(r.repeatCount)+'회'+(r.candidateAgeMin!=null?' · '+nf(r.candidateAgeMin)+'분 전 포착':'');var miss=(near?lag.concat(missing):missing).slice(0,3);return '<article class="gnLeadCard '+(near?'gnNear':'')+'" data-gn-leading-card="1"><div class="gnLeadRank">'+(i+1)+'</div><div><div class="gnLeadName">'+esc(String(r.market||'').replace('KRW-',''))+'<span class="gnLeadStage '+s.key+'">'+s.label+'</span></div><div class="gnLeadPrice">'+price+'</div><div class="gnLeadMetrics">'+metrics+'</div>'+(miss.length?'<div class="gnLeadMissing">남은 조건 · '+esc(miss.join(' · '))+'</div>':'')+'</div><div class="gnLeadAction '+s.key+'">'+s.action+'</div></article>'}
+ function render(){if(rendering||!payload)return;var box=document.getElementById('top3');if(!box)return;rendering=true;try{var rows=Array.isArray(payload.cryptoRadar)?payload.cryptoRadar:[],near=Array.isArray(payload.cryptoNearMiss)?payload.cryptoNearMiss:[];if(payload.precursorStale===true)box.innerHTML='<div class="empty">데이터 지연 · TOP3 판정 보류</div>';else if(rows.length)box.innerHTML=rows.slice(0,3).map(function(r,i){return card(r,i,false)}).join('')+'<div class="gnPolicyNote">TOP3는 이미 오른 종목이 아니라 돈 유입·구조 형성·과열 전 후보. 5AI는 ENTRY 승격에만 사용.</div>';else if(near.length)box.innerHTML='<div class="empty">현재 선행 TOP3 통과 종목 없음</div><div class="gnNearTitle">TOP3 직전 후보 · 부족 조건 표시</div>'+near.slice(0,3).map(function(r,i){return card(r,i,true)}).join('');else box.innerHTML='<div class="empty">현재 전조 후보 없음</div>';var sec=box.closest('section');if(sec){var t=sec.querySelector('.sectionTitle'),sub=sec.querySelector('.sub');if(t)t.textContent='크립토 선행 TOP3 · 폭발 전 후보';if(sub)sub.textContent='돈 유입 시작 + 구조 형성 + 과열 전 · 최근 30분 후보 재검증 → 후행/과열/미재등장 제거 → 상위 3개 · 5AI는 ENTRY 승격용';}var pill=document.getElementById('cryptoState');if(pill){var en=rows.filter(function(r){return r.strictImmediate===true}).length,sc=rows.length-en;pill.textContent='TOP3 '+rows.length+' · 전조 '+sc+' · ENTRY '+en;}}finally{setTimeout(function(){rendering=false},0)}}
  window.fetch=async function(){var args=[].slice.call(arguments),r=await oldFetch.apply(window,args);try{var u=String(args[0]&&args[0].url?args[0].url:args[0]||'');if(u.indexOf('/api/live-summary')>=0)r.clone().json().then(function(d){payload=d;setTimeout(render,60);setTimeout(render,240)}).catch(function(){})}catch(e){}return r};
  new MutationObserver(function(m){if(rendering||!payload)return;for(var i=0;i<m.length;i++){var target=m[i].target;if(target&&((target.id==='top3')||(target.closest&&target.closest('#top3')))){var b=document.getElementById('top3');if(b&&!b.querySelector('[data-gn-leading-card="1"]'))setTimeout(render,0);break}}}).observe(document.documentElement,{subtree:true,childList:true});
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){setTimeout(render,0)});else setTimeout(render,0);
@@ -117,4 +136,4 @@ function wrappedExpress(...args){
   return app;
 }
 Object.assign(wrappedExpress,previousExpress);require.cache[expressPath].exports=wrappedExpress;
-module.exports={POLICY,enforceLeadingTop3,loadBroadRadar,mergeImmediate};
+module.exports={POLICY,enforceLeadingTop3,latestByMarket,loadBroadRadar,mergeImmediate};
