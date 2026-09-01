@@ -53,41 +53,41 @@ services:
     autoDeployTrigger: commit
     buildCommand: npm install --omit=dev
     startCommand: npm run ai:analyze
-    schedule: "*/15 * * * *"
+    schedule: "*/5 * * * *"
     envVars:
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: AI_ANALYSIS_ENABLED
-        value: "false"
+        value: "true"
       - key: AI_PAID_REQUESTS_ENABLED
-        value: "false"
+        value: "true"
       - key: AI_MAX_COST_USD_PER_RUN
         value: "0.05"
       - key: PERPLEXITY_ENABLED
-        value: "false"
+        value: "true"
       - key: PERPLEXITY_API_KEY
         sync: false
       - key: XAI_ENABLED
-        value: "false"
+        value: "true"
       - key: XAI_API_KEY
         sync: false
       - key: DEEPSEEK_ENABLED
-        value: "false"
+        value: "true"
       - key: DEEPSEEK_API_KEY
         sync: false
       - key: ANTHROPIC_ENABLED
-        value: "false"
+        value: "true"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: GEMINI_ENABLED
-        value: "false"
+        value: "true"
       - key: GEMINI_API_KEY
         sync: false
 
 # Market and Pre-Pump collection are scheduled canonically in Supabase:
 # - gn_market_collector_5m
 # - gn_pre_pump_scanner_15m
-# Paid multi-AI verification is fail-closed and disabled by default.
-# Re-enabling requires BOTH AI_ANALYSIS_ENABLED=true and AI_PAID_REQUESTS_ENABLED=true.
+# The scanner now stores only immediate-entry PASS rows as TOP3.
+# Paid 5AI verification runs only on a new mechanically qualified snapshot and skips duplicates/no-candidate runs.
