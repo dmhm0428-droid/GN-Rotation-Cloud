@@ -20,7 +20,7 @@ function aiEnv(){
 }
 function runAi(){
   if(aiRunning)return;aiRunning=true;
-  const child=spawn(process.execPath,["src/ai-runner.js"],{env:aiEnv(),stdio:"inherit"});
+  const child=spawn(process.execPath,["src/ai-entry-runner.js"],{env:aiEnv(),stdio:"inherit"});
   child.on("exit",code=>{aiRunning=false;if(code!==0){console.error(`GN AI scheduler exited with code ${code}; retrying in 60s`);clearTimeout(retryTimer);retryTimer=setTimeout(runAi,60000);}});
   child.on("error",error=>{aiRunning=false;console.error("GN AI scheduler spawn error",error?.message||error);clearTimeout(retryTimer);retryTimer=setTimeout(runAi,60000);});
 }
@@ -32,8 +32,9 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
-// Big-picture is loaded first so macro/MVRV stays above coin-level TOP3 and legacy renderers.
+// Immediate-entry is loaded first so it is the final fail-closed action gate after legacy renderers.
 const preloads=[
+  "dashboard-immediate-entry-v2.js",
   "dashboard-big-picture-v1.js",
   "dashboard-precursor-top3-v1.js",
   "dashboard-metals-live-v1.js",
