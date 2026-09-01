@@ -156,12 +156,22 @@ async function loadLatestPrePump(db){
   const output=[];
   const seen=new Set();
 
-  // 1) Fresh strict ENTRY approvals always appear first.
+  // 1) Fresh strict ENTRY approvals always appear first, but the displayed
+  // entry anchor is the FIRST approved ENTRY in the current tracking episode.
+  // A repeated ENTRY scan must never overwrite the original entry price/time.
   const freshApproved=currentRows.filter(hardValidated).sort((a,b)=>Number(b.score)-Number(a.score));
   for(const row of freshApproved){
     const hist=byMarket.get(row.market)||[row];
-    const repeatCount=hist.filter(r=>new Date(r.ts)>=new Date(row.ts)).length||1;
-    output.push(formatCandidate(row,output.length+1,{action:"진입",tone:"good",newEntryAllowed:true,repeatCount,status:`진입 · 최초승인 · 연속 ${repeatCount}회 추적`}));
+    const signal=hist.slice().reverse().find(r=>signalApproved(r,{checkAge:false}))||row;
+    const signalTime=new Date(signal.ts).getTime();
+    const repeatCount=hist.filter(r=>new Date(r.ts).getTime()>=signalTime).length||1;
+    const repeated=new Date(signal.ts).getTime()!==new Date(row.ts).getTime();
+    const state=continuityState({signal,current:row,market,repeatCount});
+    const action=repeated?state.action:"진입";
+    const tone=repeated?state.tone:"good";
+    const newEntryAllowed=repeated?state.newEntryAllowed:true;
+    const status=repeated?`${action} · 최초 ENTRY ${repeatCount}회 추적${newEntryAllowed?" · 신규진입 가능":""}`:`진입 · 최초승인 · 연속 ${repeatCount}회 추적`;
+    output.push(formatCandidate(row,output.length+1,{signal,action,tone,newEntryAllowed,repeatCount,status,gain:state.gain,scoreDrop:state.scoreDrop,reason:repeated?state.reason:undefined}));
     seen.add(row.market);
   }
 
