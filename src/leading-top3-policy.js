@@ -7,11 +7,12 @@ function lagReasons(row){
   const ev=obj(row?.empiricalValidation);
   const reasons=[];
   if(ev.lagging===true)reasons.push("후행 판정");
-  const ma=num(row?.maAlignment),ma20=num(row?.ma20Slope),obv=num(row?.obv1h),accel=num(row?.volumeAccel5m);
+  const ma=num(row?.maAlignment),ma20=num(row?.ma20Slope),obv=num(row?.obv1h),accel=num(row?.volumeAccel5m),age=num(row?.candidateAgeMin);
   if(ma!=null&&ma<40)reasons.push("MA정렬 40% 미만");
   if(ma20!=null&&ma20<=0)reasons.push("MA20 기울기 0 이하");
   if(obv!=null&&obv<=0)reasons.push("OBV1H 0 이하");
   if(accel!=null&&accel>=10)reasons.push("5분 거래량가속 10배 이상 과열");
+  if(age!=null&&age>20)reasons.push("20분 이상 재등장 없음");
   const stage=String(row?.precursorStage||row?.details?.precursor?.confidence_stage||"").toUpperCase();
   if(stage==="REJECT_DECAY")reasons.push("전조 약화");
   return [...new Set(reasons)];
@@ -50,6 +51,7 @@ function scoreLeading(row){
   const accel=num(row?.volumeAccel5m);if(accel!=null&&accel>0&&accel<10)score+=Math.min(accel,6)*4;
   const rise=num(row?.riseSinceFirstPct);
   if(rise!=null){if(rise>20)score-=180;else if(rise>12)score-=100;else if(rise>7)score-=45;else if(rise>=0)score+=12;}
+  const age=num(row?.candidateAgeMin);if(age!=null)score-=Math.min(Math.max(age,0),30)*2.5;
   const rank=num(row?.rank);if(rank!=null)score-=Math.max(0,rank-1)*2;
   return +score.toFixed(2);
 }
