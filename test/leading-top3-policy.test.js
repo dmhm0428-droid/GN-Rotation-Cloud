@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const {selectLeadingTop3,stageOf}=require("../src/leading-top3-policy");
 
 function row(market,rank,overrides={}){
-  return {market,rank,mechanicalScore:60,maAlignment:55,ma20Slope:.05,obv1h:.08,volumeAccel5m:2,repeatCount:1,riseSinceFirstPct:1,empiricalValidation:{lead_core:false,lagging:false},...overrides};
+  return {market,rank,mechanicalScore:60,maAlignment:55,ma20Slope:.05,obv1h:.08,volumeAccel5m:2,repeatCount:1,riseSinceFirstPct:1,candidateAgeMin:1,empiricalValidation:{lead_core:false,lagging:false},...overrides};
 }
 
 test("TOP3 uses broader non-lagging precursors instead of requiring ENTRY",()=>{
@@ -35,4 +35,16 @@ test("hard lagging/overheated rows do not enter TOP3 and remain explainable near
   assert.ok(hot);
   assert.equal(hot.isLagging,true);
   assert.ok(hot.lagReasons.some(x=>x.includes("과열")));
+});
+
+test("a candidate that has not reappeared for over 20 minutes cannot occupy TOP3",()=>{
+  const out=selectLeadingTop3([
+    row("KRW-OLD",1,{candidateAgeMin:24,mechanicalScore:99,repeatCount:4,maAlignment:100,ma20Slope:.8,obv1h:.8}),
+    row("KRW-NOW",2,{candidateAgeMin:2,maAlignment:70,ma20Slope:.2,obv1h:.2})
+  ]);
+  assert.equal(out.top3[0].market,"KRW-NOW");
+  assert.equal(out.top3.some(x=>x.market==="KRW-OLD"),false);
+  const old=out.nearMiss.find(x=>x.market==="KRW-OLD");
+  assert.ok(old);
+  assert.ok(old.lagReasons.some(x=>x.includes("20분")));
 });
