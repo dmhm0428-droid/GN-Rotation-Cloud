@@ -2,7 +2,7 @@
 
 const FRESH_MS=12*60*1000;
 const EPISODE_MATCH_MS=30*60*1000;
-const POLICY="후행배제: MA20≤0 또는 OBV1H≤0 또는 MA정렬<40 또는 5분가속≥10배 · 선행: MA정렬≥60 + MA20≥0.10 + OBV1H≥0.10 + 5분가속<10 · 추천후보: 반복≥2";
+const POLICY="후행배제: MA20≤0 또는 OBV1H≤0 또는 MA정렬<40 또는 5분가속≥10배 · 선행: MA정렬≥60 + MA20≥0.10 + OBV1H≥0.10 + 5분가속<10 · 추천후보: 반복≥2 · ENTRY V54: 선행/반복+해외현물+데이터품질+RR+미시수급 필수, 파생/온체인/신선AI 중 1개 이상 긍정확인";
 
 function num(v){const n=Number(v);return Number.isFinite(n)?n:null;}
 function pct100(v){const n=num(v);return n==null?null:+(n*100).toFixed(2);}
@@ -36,31 +36,39 @@ function actionFor({strictEntry,recommendationEligible,leadCore,lagging,repeat})
   if(repeat>=2)return {text:"반복 관찰",tone:"warn",observationOnly:true};
   return {text:"관찰만",tone:"neutral",observationOnly:true};
 }
-function mapRow(row,outcomes,summaryByBucket){
-  const d=object(row?.details),p=object(d.precursor),persist=object(p.persistence),expRaw=object(d.listing_expansion_evidence||d.expansion),ma=object(p.ma_transition),leader=object(d.leader_flow),ev=object(d.empirical_validation);
+function mapRow(row,outcomes,summaryByBucket,readinessByMarket=new Map()){
+  const d=object(row?.details),p=object(d.precursor),persist=object(p.persistence),expRaw=object(d.listing_expansion_evidence||d.expansion),ma=object(p.ma_transition),leader=object(d.leader_flow),ev=object(d.empirical_validation),ready=object(readinessByMarket.get(row.market));
   const repeat=Math.max(1,Number(ev.repeat??persist.repeat_count_30m??persist.consecutive_top3??leader.top3_count_2h??1));
   const stage=stageMeta(p.confidence_stage,repeat,ev);
   const expansion={score:num(expRaw.score),thesis:expRaw.thesis||"확장근거 추가 확인 필요",globalSpotOk:expRaw.global_spot_ok===true,derivativesOk:expRaw.derivatives_ok===true,onchainOk:expRaw.onchain_ok===true,majorExchangeCount:num(expRaw.major_exchange_count)??(Array.isArray(d.foreign_venues)?d.foreign_venues.length:0)};
-  const strictEntry=d.entry_allowed===true&&String(row.status||"").toUpperCase()==="ENTRY";
-  const recommendationEligible=ev.recommendation_eligible===true;
+  const strictEntry=ready.entry_ready===true||(d.entry_allowed===true&&String(row.status||"").toUpperCase()==="ENTRY");
+  const recommendationEligible=ready.recommendation_eligible===true||ev.recommendation_eligible===true;
   const action=actionFor({strictEntry,recommendationEligible,leadCore:ev.lead_core===true,lagging:ev.lagging===true,repeat});
   const ep=currentEpisode(row,outcomes),bucket=persistenceBucket(repeat),stats=summaryByBucket.get(bucket)||null;
   return {...row,
     detectionScore:num(p.score),mechanicalScore:num(ev.mechanical_score??row.score),empiricalRule:ev.rule||null,empiricalValidation:ev,
     firstDetectedAt:row.first_detected_at||d.first_detected_at||row.ts||null,firstDetectedPrice:num(row.first_detected_price??d.first_detected_price),currentPrice:num(row.krw_price),riseSinceFirstPct:num(row.rise_since_first)!=null?+(num(row.rise_since_first)*100).toFixed(2):num(d.rise_since_first_pct),
-    precursorStage:stage.code,stageLabel:stage.label,stageTone:stage.tone,repeatCount:repeat,
+    precursorStage:strictEntry?"ENTRY_READY":stage.code,stageLabel:strictEntry?"ENTRY 검증통과":stage.label,stageTone:strictEntry?"good":stage.tone,repeatCount:repeat,
     persistence:{repeatCount30m:repeat,consecutiveTop3:Number(persist.consecutive_top3)||repeat,top3Count30m:Number(persist.top3_count_30m??persist.prior_top3_count_30m)||0,top6Count30m:Number(persist.top6_count_30m)||0,top6Count6h:Number(persist.top6_count_6h)||0,top12Count6h:Number(persist.top12_count_6h)||0},
     archetype:p.archetype||null,maScore:num(ma.score),maAlignment:num(ev.ma_alignment??ma.alignment),ma20Slope:num(ev.ma20_slope_3h??ma.ma20_slope_3h),ma50Slope:num(ev.ma50_slope_3h??ma.ma50_slope_3h),obv1h:num(ev.obv_direction_1h??ma.obv_direction_1h),volumeAccel5m:num(ev.volume_accel_5m??p.volume_accel_5m),maReasons:Array.isArray(ma.reasons)?ma.reasons:[],
-    expansion,entryAllowed:strictEntry,recommendationEligible,fiveAiGateOk:d.five_ai_gate_ok===true,precursorAction:action.text,precursorActionTone:action.tone,observationOnly:action.observationOnly,postValidation:mapOutcome(ep),
+    expansion,entryAllowed:strictEntry,recommendationEligible,fiveAiGateOk:d.five_ai_gate_ok===true,entryReadiness:ready.entry_ready===true,entryCoreReady:ready.core_ready===true,entryBlockReason:ready.readiness_reason||null,rrOk:ready.rr_ok===true,rr:num(ready.rr),derivativesOk:ready.derivatives_ok===true,onchainOk:ready.onchain_ok===true,externalConfirmationCount:Number(ready.external_confirmation_count)||0,aiRecent:ready.ai_recent===true,aiPass:ready.ai_pass===true,precursorAction:action.text,precursorActionTone:action.tone,observationOnly:action.observationOnly,postValidation:mapOutcome(ep),
     validationStats:stats?{bucket,episodes:Number(stats.episodes)||0,n1h:Number(stats.n_1h)||0,avg1hPct:num(stats.avg_1h_pct),win1h3Pct:num(stats.win_1h_3pct),n3h:Number(stats.n_3h)||0,avg3hPct:num(stats.avg_3h_pct),hit3h5Pct:num(stats.hit_3h_5pct),avgMfe3hPct:num(stats.avg_mfe_3h_pct),avgMae3hPct:num(stats.avg_mae_3h_pct)}:null
   };
 }
 async function loadPrecursorRadar(db){
   const latest=await db.from("gn_pre_pump_snapshots").select("ts").order("ts",{ascending:false}).limit(1).maybeSingle();if(latest.error)throw latest.error;const ts=latest.data?.ts||null;if(!ts)return {updatedAt:null,stale:true,rows:[],validationSummary:[]};const age=Date.now()-new Date(ts).getTime();if(!Number.isFinite(age)||age<0||age>FRESH_MS)return {updatedAt:ts,stale:true,rows:[],validationSummary:[]};
-  const top=await db.from("gn_pre_pump_snapshots").select("*").eq("ts",ts).lte("rank",3).order("rank",{ascending:true});if(top.error)throw top.error;const markets=(top.data||[]).map(x=>x.market).filter(Boolean);let outcomes=[],summary=[];
-  if(markets.length){const cutoff=new Date(Date.now()-8*3600*1000).toISOString();const out=await db.from("gn_precursor_outcomes").select("market,episode_start_ts,last_signal_ts,max_repeat_top3_30m,ret_15m,ret_30m,ret_1h,ret_3h,mfe_3h,mae_3h,outcome,entry_classification,completed_at").in("market",markets).gte("episode_start_ts",cutoff).order("episode_start_ts",{ascending:false});if(!out.error)outcomes=out.data||[];}
-  const val=await db.from("gn_precursor_validation_summary").select("*");if(!val.error)summary=val.data||[];const map=new Map(summary.map(x=>[x.persistence_bucket,x]));
-  return {updatedAt:ts,stale:false,rows:(top.data||[]).map(r=>mapRow(r,outcomes,map)).filter(r=>r.empiricalValidation?.lagging!==true),validationSummary:summary};
+  const top=await db.from("gn_pre_pump_snapshots").select("*").eq("ts",ts).lte("rank",3).order("rank",{ascending:true});if(top.error)throw top.error;const markets=(top.data||[]).map(x=>x.market).filter(Boolean);let outcomes=[],summary=[],readiness=[];
+  if(markets.length){
+    const cutoff=new Date(Date.now()-8*3600*1000).toISOString();
+    const [out,ready]=await Promise.all([
+      db.from("gn_precursor_outcomes").select("market,episode_start_ts,last_signal_ts,max_repeat_top3_30m,ret_15m,ret_30m,ret_1h,ret_3h,mfe_3h,mae_3h,outcome,entry_classification,completed_at").in("market",markets).gte("episode_start_ts",cutoff).order("episode_start_ts",{ascending:false}),
+      db.from("gn_entry_readiness_v54").select("*").in("market",markets)
+    ]);
+    if(!out.error)outcomes=out.data||[];
+    if(!ready.error)readiness=ready.data||[];
+  }
+  const val=await db.from("gn_precursor_validation_summary").select("*");if(!val.error)summary=val.data||[];const map=new Map(summary.map(x=>[x.persistence_bucket,x])),readinessMap=new Map(readiness.map(x=>[x.market,x]));
+  return {updatedAt:ts,stale:false,rows:(top.data||[]).map(r=>mapRow(r,outcomes,map,readinessMap)).filter(r=>r.empiricalValidation?.lagging!==true),validationSummary:summary};
 }
 async function enrichLiveSummary(db,body){if(!body||typeof body!=="object"||Array.isArray(body))return body;try{const precursor=await loadPrecursorRadar(db);return {...body,cryptoRadar:precursor.rows,precursorUpdatedAt:precursor.updatedAt,precursorStale:precursor.stale,precursorValidation:precursor.validationSummary,precursorPolicy:POLICY};}catch(error){return {...body,cryptoRadar:[],precursorStale:true,precursorError:String(error?.message||error),precursorPolicy:"FAIL_CLOSED"};}}
 module.exports={POLICY,actionFor,currentEpisode,enrichLiveSummary,loadPrecursorRadar,mapOutcome,mapRow,persistenceBucket,stageMeta};
