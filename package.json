@@ -7,9 +7,9 @@
     "node": ">=22 <25"
   },
   "scripts": {
-    "ai:analyze": "node src/ai-runner.js",
+    "ai:analyze": "node src/ai-entry-runner.js",
     "collector": "node src/collector.js",
-    "pre-pump": "node src/upbit-pre-pump-runner.js",
+    "pre-pump": "node src/immediate-entry-runner.js",
     "start": "node src/start.js",
     "test": "node --test"
   },
