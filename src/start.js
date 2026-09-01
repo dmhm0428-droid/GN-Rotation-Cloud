@@ -32,8 +32,10 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
-// Immediate-entry is loaded first so it is the final fail-closed action gate after legacy renderers.
+// Leading TOP3 is loaded first so it is the final authoritative crypto layer:
+// precursor candidates survive; immediate-entry/5AI only upgrades a candidate to ENTRY.
 const preloads=[
+  "dashboard-leading-top3-v2.js",
   "dashboard-immediate-entry-v2.js",
   "dashboard-big-picture-v1.js",
   "dashboard-precursor-top3-v1.js",
