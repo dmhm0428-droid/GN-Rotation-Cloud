@@ -41,15 +41,17 @@ function mapOutcome(ep){
     classification:ep.entry_classification||null
   };
 }
-function actionFor({entryAllowed,status,stage,repeat,expansion}){
-  if(entryAllowed&&String(status||"").toUpperCase()==="ENTRY")return {text:"진입검증",tone:"good",observationOnly:false};
+function actionFor({entryAllowed,status,stage,repeat,expansion,independent,sameDayReady,entrySlot}){
+  if(independent!==true)return {text:"BTC·ETH 의존 제외",tone:"bad",observationOnly:true};
+  if(sameDayReady!==true)return {text:"당일발동 대기",tone:"warn",observationOnly:true};
+  if(entryAllowed&&String(status||"").toUpperCase()==="ENTRY"&&Number(entrySlot)===1)return {text:"당일 ENTRY",tone:"good",observationOnly:false};
   if(stage.code==="REJECT_DECAY")return {text:"제외",tone:"bad",observationOnly:true};
   if(repeat>=3&&num(expansion.score)>=80&&expansion.globalSpotOk===true&&expansion.derivativesOk===true)return {text:"우선감시",tone:"good",observationOnly:true};
   if(repeat>=2)return {text:"반복감시",tone:"warn",observationOnly:true};
   return {text:"전조감시",tone:"neutral",observationOnly:true};
 }
 function mapRow(row,outcomes,summaryByBucket){
-  const d=object(row?.details),p=object(d.precursor),persist=object(p.persistence),expRaw=object(d.listing_expansion_evidence||d.expansion),ma=object(p.ma_transition),leader=object(d.leader_flow);
+  const d=object(row?.details),p=object(d.precursor),persist=object(p.persistence),expRaw=object(d.listing_expansion_evidence||d.expansion),ma=object(p.ma_transition),leader=object(d.leader_flow),ind=object(d.benchmark_independence);
   const repeat=Math.max(1,Number(persist.repeat_count_30m||persist.consecutive_top3||leader.top3_count_2h||1));
   const stage=stageMeta(p.confidence_stage,repeat);
   const expansion={
@@ -61,7 +63,10 @@ function mapRow(row,outcomes,summaryByBucket){
     majorExchangeCount:num(expRaw.major_exchange_count)??(Array.isArray(d.foreign_venues)?d.foreign_venues.length:0)
   };
   const entryAllowed=d.entry_allowed===true;
-  const action=actionFor({entryAllowed,status:row.status,stage,repeat,expansion});
+  const independent=ind.independent===true;
+  const sameDayReady=ind.same_day_ready===true;
+  const entrySlot=num(ind.entry_slot);
+  const action=actionFor({entryAllowed,status:row.status,stage,repeat,expansion,independent,sameDayReady,entrySlot});
   const ep=currentEpisode(row,outcomes);
   const bucket=persistenceBucket(repeat);
   const stats=summaryByBucket.get(bucket)||null;
@@ -89,6 +94,23 @@ function mapRow(row,outcomes,summaryByBucket){
     expansion,
     entryAllowed,
     fiveAiGateOk:d.five_ai_gate_ok===true,
+    btcEthIndependent:independent,
+    dependencyClass:ind.class||"UNKNOWN",
+    benchmarkAvailable:ind.benchmark_available===true,
+    independenceScore:num(ind.score),
+    sameDayActivationScore:num(ind.same_day_activation_score),
+    sameDayReady,
+    entrySlot,
+    executionPriority:num(ind.execution_priority),
+    activationWindow:ind.activation_window||"1-6H",
+    holdingHorizon:ind.holding_horizon||"INTRADAY_1D",
+    sameDayExitRequired:ind.same_day_exit_required!==false,
+    relative5mVsBtc:pct100(ind.relative_5m_vs_btc),
+    relative5mVsEth:pct100(ind.relative_5m_vs_eth),
+    relative15mVsBtc:pct100(ind.relative_15m_vs_btc),
+    relative15mVsEth:pct100(ind.relative_15m_vs_eth),
+    relative60mVsBtc:pct100(ind.relative_60m_vs_btc),
+    relative60mVsEth:pct100(ind.relative_60m_vs_eth),
     precursorAction:action.text,
     precursorActionTone:action.tone,
     observationOnly:action.observationOnly,
@@ -134,7 +156,7 @@ async function enrichLiveSummary(db,body){
   if(!body||typeof body!=="object"||Array.isArray(body))return body;
   try{
     const precursor=await loadPrecursorRadar(db);
-    return {...body,cryptoRadar:precursor.rows,precursorUpdatedAt:precursor.updatedAt,precursorStale:precursor.stale,precursorValidation:precursor.validationSummary,precursorPolicy:"전조 → 반복 TOP3 → 해외현물·파생 확장검증 → 사후검증"};
+    return {...body,cryptoRadar:precursor.rows,precursorUpdatedAt:precursor.updatedAt,precursorStale:precursor.stale,precursorValidation:precursor.validationSummary,precursorPolicy:"BTC·ETH 독립강도 → 1~6H 당일발동 → 반복·해외 검증 → ENTRY 0~1 → 당일청산"};
   }catch(error){
     return {...body,cryptoRadar:[],precursorStale:true,precursorError:String(error?.message||error),precursorPolicy:"FAIL_CLOSED"};
   }
