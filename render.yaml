@@ -18,8 +18,6 @@ services:
         value: gn
       - key: DASHBOARD_PASSWORD
         generateValue: true
-      - key: NODE_OPTIONS
-        value: "--require=./src/pre-pump-dashboard-hotfix.js"
       - key: AI_ANALYSIS_ENABLED
         value: "false"
       - key: AI_PAID_REQUESTS_ENABLED
@@ -88,7 +86,8 @@ services:
       - key: GEMINI_API_KEY
         sync: false
 
-# Market and Pre-Pump collection are scheduled canonically in Supabase.
-# Dashboard hotfix promotes only conservative SCOUTs to 15m early-entry when all risk gates pass
-# and the sole remaining blocker is repeat/fresh-transition confirmation.
-# Approved intraday signals remain visible and continue live-price tracking after they leave TOP3.
+# Market and Pre-Pump collection are scheduled canonically in Supabase:
+# - gn_market_collector_5m
+# - gn_pre_pump_scanner_15m
+# Scanner/validator remain the canonical source of TOP3/SCOUT/ENTRY state.
+# Experimental early-entry logic must stay shadow-only until sample and regression criteria pass.
