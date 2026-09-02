@@ -32,14 +32,12 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
-// 4H chase guard is first so it runs last, after leading TOP3 has assembled the candidate/near-miss pool.
 // Crypto TOP3 UI has ONE owner only: dashboard-leading-top3-v2.
 // Legacy crypto UI layers (immediate-entry-v2 / precursor-top3-v1 / top3-policy / strict 5AI gate)
 // are intentionally not preloaded because their browser MutationObservers/fetch wrappers race each
 // other and make the cards/status flicker. Current scanner V69 already persists row-level
 // SCOUT/ENTRY + entry_allowed, and leading-top3-v2 reads/revalidates those canonical DB rows.
 const preloads=[
-  "dashboard-4h-chase-guard.js",
   "dashboard-leading-top3-v2.js",
   "dashboard-big-picture-v1.js",
   "dashboard-metals-live-v1.js",
