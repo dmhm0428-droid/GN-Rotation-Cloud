@@ -12,12 +12,14 @@ function ageMin(ts,now=Date.now()){
 function fresh(ts,now=Date.now(),maxMs=FRESH_MS){
   const a=ageMin(ts,now);return a!=null&&a>=0&&a*60000<=maxMs;
 }
-function oldestValue(rows,key){
-  for(let i=(rows||[]).length-1;i>=0;i--){const v=num(rows[i]?.[key]);if(v!=null)return v;}
-  return null;
+function lookbackValue(rows,key,referenceTs,minutes=60){
+  const ref=new Date(referenceTs||0).getTime();if(!Number.isFinite(ref)||ref<=0)return null;
+  const target=ref-minutes*60000;
+  const candidates=(rows||[]).map(r=>({v:num(r?.[key]),t:new Date(r?.ts||0).getTime()})).filter(x=>x.v!=null&&Number.isFinite(x.t)&&x.t>0).map(x=>({...x,d:Math.abs(x.t-target)})).sort((a,b)=>a.d-b.d);
+  return candidates[0]&&candidates[0].d<=30*60000?candidates[0].v:null;
 }
-function delta(rows,key,current){
-  const old=oldestValue(rows,key),now=num(current);return old!=null&&now!=null?+(now-old).toFixed(2):null;
+function delta1h(rows,key,current,referenceTs){
+  const old=lookbackValue(rows,key,referenceTs,60),now=num(current);return old!=null&&now!=null?+(now-old).toFixed(2):null;
 }
 function coinPulse(rows,coin,now=Date.now()){
   const series=(rows||[]).filter(r=>String(r?.coin||"").toUpperCase()===coin).filter(r=>fresh(r.ts,now,6*3600000)).sort((a,b)=>new Date(b.ts)-new Date(a.ts));
@@ -38,15 +40,15 @@ function summarize(axes){
 }
 function buildQ4Path({market,macro,marketHistory=[],macroHistory=[],coinRows=[],events={},now=Date.now()}={}){
   const footprint=num(market?.market_score),rates=num(macro?.rates_score),policy=num(macro?.policy_score),commodities=num(macro?.commodities_score),volatility=num(macro?.volatility_score),breadth=num(market?.spot_breadth100);
-  const marketFresh=fresh(market?.ts,now),macroFresh=fresh(macro?.ts,now),marketDelta=marketFresh?delta(marketHistory,"market_score",footprint):null,ratesDelta=macroFresh?delta(macroHistory,"rates_score",rates):null;
+  const marketFresh=fresh(market?.ts,now),macroFresh=fresh(macro?.ts,now),marketDelta=marketFresh?delta1h(marketHistory,"market_score",footprint,market?.ts):null,ratesDelta=macroFresh?delta1h(macroHistory,"rates_score",rates,macro?.ts):null;
   const btc=coinPulse(coinRows,"BTC",now),eth=coinPulse(coinRows,"ETH",now),rp=ratePath(macro,events),sep=num(rp.path?.september?.hike_25bp_probability),decExtra=num(rp.path?.december?.additional_hike_probability);
 
   const reversal=summarize([
-    axis("장기금리 진정",rates!=null&&(rates>=50||(ratesDelta!=null&&ratesDelta>=5)),`금리점수 ${rates?.toFixed?.(1)??"--"}${ratesDelta!=null?` · 최근 ${ratesDelta>=0?"+":""}${ratesDelta.toFixed(1)}`:""}`,macroFresh&&rates!=null),
+    axis("장기금리 진정",rates!=null&&(rates>=50||(ratesDelta!=null&&ratesDelta>=5)),`금리점수 ${rates?.toFixed?.(1)??"--"}${ratesDelta!=null?` · 1h ${ratesDelta>=0?"+":""}${ratesDelta.toFixed(1)}`:""}`,macroFresh&&rates!=null),
     axis("Fed 경로 완화",rp.risk!=null&&(rp.risk<=55||policy>=45),`금리경로 위험 ${rp.risk??"--"}${sep!=null?` · 9월 ${sep.toFixed(1)}%`:""}${decExtra!=null?` · 12월 추가 ${decExtra.toFixed(1)}%`:""}`,macroFresh&&rp.risk!=null),
     axis("원자재 충격 진정",commodities!=null&&commodities>=50,`원자재점수 ${commodities?.toFixed?.(1)??"--"}`,macroFresh&&commodities!=null),
     axis("시장 폭 회복",breadth!=null&&breadth>=.45,`상승종목 비율 ${breadth!=null?(breadth*100).toFixed(0):"--"}%`,marketFresh&&breadth!=null),
-    axis("발자국 회복",footprint!=null&&footprint>=45&&(marketDelta==null||marketDelta>=3),`시장점수 ${footprint?.toFixed?.(1)??"--"}${marketDelta!=null?` · 최근 ${marketDelta>=0?"+":""}${marketDelta.toFixed(1)}`:""}`,marketFresh&&footprint!=null),
+    axis("발자국 회복",footprint!=null&&footprint>=45&&(marketDelta==null||marketDelta>=3),`시장점수 ${footprint?.toFixed?.(1)??"--"}${marketDelta!=null?` · 1h ${marketDelta>=0?"+":""}${marketDelta.toFixed(1)}`:""}`,marketFresh&&footprint!=null),
     axis("BTC·ETH 저점 이격",btc.aboveLowPct!=null&&eth.aboveLowPct!=null&&btc.aboveLowPct>=1.5&&eth.aboveLowPct>=1.5,`BTC +${btc.aboveLowPct??"--"}% · ETH +${eth.aboveLowPct??"--"}% (6h 저점 대비)`,btc.available&&eth.available)
   ]);
 
