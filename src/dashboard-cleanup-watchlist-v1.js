@@ -58,17 +58,43 @@ function sanitizeRotationPayload(body){
 
 const SCRIPT=`<style id="gn-cleanup-watch-style-v1">
 .gnWatchPrice{font-weight:900}.gnWatchMeta{font-size:11px;color:#8f9ba7;margin-top:4px}.gnDataWait{color:#ffd166!important}
+header{position:relative;z-index:50}header button#gnManualRefresh{position:relative;z-index:60;pointer-events:auto!important;touch-action:manipulation!important;-webkit-tap-highlight-color:rgba(255,255,255,.16);cursor:pointer;user-select:none;-webkit-user-select:none;min-width:82px}header button#gnManualRefresh.gnRefreshing{opacity:.75}
 </style><script id="gn-cleanup-watch-v1">(function(){
 const esc=v=>String(v==null?'':v).replace(/[&<>\\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\\"':'&quot;',"'":'&#39;'}[c]));
 const fmt=v=>Number.isFinite(Number(v))?'$'+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'가격 대기';
-let last=null,busy=false,timer=null;
+let last=null,busy=false,timer=null,refreshBusy=false;
 function stockCard(){const host=document.getElementById('leaders');if(!host)return null;return Array.from(host.querySelectorAll('.leader')).find(x=>/주식/.test(x.querySelector('.leaderTop span')?.textContent||''))||null}
 function applyWatch(){if(!last)return;const card=stockCard();if(!card)return;const items=last.items||[];const top=card.querySelector('.leaderTop span'),badge=card.querySelector('.leaderTop b'),sym=card.querySelector('.leaderSymbol'),meta=card.querySelector('.leaderMeta');if(top)top.textContent='주식 · 핵심 관찰';if(badge){badge.textContent='상세 아래';badge.className='warn'}if(sym)sym.innerHTML=items.map(x=>'<span class="gnWatchPrice">'+esc(x.symbol)+' '+esc(fmt(x.price))+'</span>').join(' · ');if(meta)meta.innerHTML='<span class="gnWatchMeta">MNDY AI 소프트웨어 · IREN AI/HPC · 중복 후보명은 아래 상세 섹터에서만 표시</span>'}
 function fixRotation(){const rows=document.getElementById('rotationRows');if(!rows)return;const texts=Array.from(rows.children).map(x=>x.textContent||'');if(!texts.length||!texts.every(t=>t.includes('데이터대기')))return;const s=document.getElementById('rotationSummary'),l=document.getElementById('rotationLeader');if(s){s.textContent='자금회전 데이터 검증 대기 · 0값 순위 제외';s.classList.add('gnDataWait')}if(l){l.textContent='선두 데이터대기';l.classList.add('gnDataWait')}}
-async function loadWatch(){if(busy)return;busy=true;try{const r=await fetch('/api/watch-stocks?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);last=await r.json();applyWatch()}catch(e){}finally{busy=false}}
-function scheduleApply(){clearTimeout(timer);timer=setTimeout(()=>{applyWatch();fixRotation()},80)}
+async function loadWatch(force){if(busy)return;busy=true;try{const r=await fetch('/api/watch-stocks?t='+Date.now()+(force?'&force=1':''),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);last=await r.json();applyWatch()}catch(e){}finally{busy=false}}
+async function manualRefresh(){
+  if(refreshBusy)return;refreshBusy=true;
+  const b=document.getElementById('gnManualRefresh');if(b){b.textContent='갱신 중…';b.classList.add('gnRefreshing')}
+  try{
+    const jobs=[];
+    if(typeof window.loadGN==='function')jobs.push(Promise.resolve().then(()=>window.loadGN()));
+    if(typeof window.gnLiveSummary==='function')jobs.push(Promise.resolve().then(()=>window.gnLiveSummary()));
+    if(typeof window.loadRotation==='function')jobs.push(Promise.resolve().then(()=>window.loadRotation()));
+    if(typeof window.gnBigPicture==='function')jobs.push(Promise.resolve().then(()=>window.gnBigPicture()));
+    jobs.push(Promise.resolve().then(()=>loadWatch(true)));
+    await Promise.allSettled(jobs);
+    applyWatch();fixRotation();
+    const u=document.getElementById('updated');if(u&&!/재조회|오류/.test(u.textContent||''))u.textContent='수동 새로고침 완료 · '+new Date().toLocaleTimeString();
+  }finally{
+    refreshBusy=false;if(b){b.textContent='새로고침';b.classList.remove('gnRefreshing')}
+  }
+}
+function bindRefresh(){
+  const header=document.querySelector('header');if(!header)return;
+  const b=Array.from(header.querySelectorAll('button')).find(x=>(x.textContent||'').trim()==='새로고침'||x.id==='gnManualRefresh');if(!b)return;
+  b.id='gnManualRefresh';b.type='button';b.removeAttribute('onclick');b.disabled=false;b.setAttribute('aria-label','GN PIVOT 데이터 새로고침');
+  if(b.dataset.gnBound==='1')return;b.dataset.gnBound='1';
+  b.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();manualRefresh();},{passive:false});
+  b.addEventListener('touchend',function(ev){ev.preventDefault();ev.stopPropagation();manualRefresh();},{passive:false});
+}
+function scheduleApply(){clearTimeout(timer);timer=setTimeout(()=>{bindRefresh();applyWatch();fixRotation()},80)}
 const obs=new MutationObserver(scheduleApply);obs.observe(document.documentElement,{subtree:true,childList:true});
-setTimeout(()=>{loadWatch();fixRotation()},500);setInterval(loadWatch,15000);setInterval(fixRotation,3000);})();</script>`;
+setTimeout(()=>{bindRefresh();loadWatch();fixRotation()},300);setInterval(()=>{bindRefresh();loadWatch()},15000);setInterval(fixRotation,3000);window.gnManualRefresh=manualRefresh;})();</script>`;
 
 function patchHtml(html){
   if(typeof html!=="string"||!html.includes("<title>GN PIVOT</title>")||html.includes("gn-cleanup-watch-v1"))return html;
