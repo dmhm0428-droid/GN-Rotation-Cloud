@@ -6,12 +6,13 @@ const BATCH_SIZE=8;
 const BATCH_DELAY_MS=1100;
 const DAILY_RISK_COUNT=35;
 const DAILY_RISK_TOP_N=15;
+const BASE_ASSET_MARKETS=new Set(["KRW-BTC","KRW-ETH"]);
 
 async function fetchJson(url,{fetchImpl=fetch,timeoutMs=10000}={}){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
-    const response=await fetchImpl(url,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"GN-Pre-Pump-Scanner-v4"}});
+    const response=await fetchImpl(url,{signal:controller.signal,headers:{Accept:"application/json","User-Agent":"GN-Pre-Pump-Scanner-v5"}});
     if(!response.ok)throw new Error(`Upbit quotation API returned HTTP ${response.status}`);
     return response.json();
   }finally{clearTimeout(timer);}
@@ -22,6 +23,7 @@ function closeAtOrBefore(candles,target){return candles.find(candle=>candleTime(
 function price(candle,field){const value=Number(candle?.[field]);return Number.isFinite(value)?value:Number(candle?.trade_price);}
 function sumTurnover(candles){return candles.reduce((sum,c)=>sum+(Number(c.candle_acc_trade_price)||0),0);}
 function mean(values){const valid=values.map(Number).filter(Number.isFinite);return valid.length?valid.reduce((a,b)=>a+b,0)/valid.length:null;}
+function clamp01(v){return Math.max(0,Math.min(1,Number(v)||0));}
 
 function calculateObvSeries(ordered){
   const chronological=ordered.slice().reverse();
@@ -191,14 +193,104 @@ function highDistance1h(ordered){
 
 function calculateMetrics(market,candles){
   const ordered=(candles||[]).slice().sort((a,b)=>candleTime(b)-candleTime(a));if(ordered.length<3)return null;
-  const latest=ordered[0],latestTime=candleTime(latest),latestPrice=Number(latest.trade_price),price5=Number(closeAtOrBefore(ordered,latestTime-5*60*1000)),price15=Number(closeAtOrBefore(ordered,latestTime-15*60*1000));
+  const latest=ordered[0],latestTime=candleTime(latest),latestPrice=Number(latest.trade_price),price5=Number(closeAtOrBefore(ordered,latestTime-5*60*1000)),price15=Number(closeAtOrBefore(ordered,latestTime-15*60*1000)),price60=Number(closeAtOrBefore(ordered,latestTime-60*60*1000));
   if(!Number.isFinite(latestPrice)||!Number.isFinite(price5)||!Number.isFinite(price15)||price5<=0||price15<=0)return null;
   const recentStart=latestTime-14*60*1000,previousStart=latestTime-29*60*1000;
   const recent=ordered.filter(c=>{const t=candleTime(c);return t>=recentStart&&t<=latestTime;}),previous=ordered.filter(c=>{const t=candleTime(c);return t>=previousStart&&t<recentStart;});
   if(recent.length<10||previous.length<10)return null;
   const turnover=sumTurnover(recent),previousTurnover=sumTurnover(previous);if(previousTurnover<=0)return null;
   const structure15m=calculate15mStructure(ordered),structure1h=classify1hStructure(ordered);
-  return {market,symbol:market.replace(/^KRW-/,""),return5m:latestPrice/price5-1,return15m:latestPrice/price15-1,turnoverGrowth15m:turnover/previousTurnover-1,obvDirection:calculateObvDirection(ordered),higherLow15m:structure15m.higherLow,resistanceProximity15m:structure15m.resistanceProximity,structure1h,highDistance1h:highDistance1h(ordered),pullbackRebreak1h:structure15m.higherLow&&structure1h==="sideways_breakout"};
+  return {
+    market,
+    symbol:market.replace(/^KRW-/,""),
+    return5m:latestPrice/price5-1,
+    return15m:latestPrice/price15-1,
+    return60m:Number.isFinite(price60)&&price60>0?latestPrice/price60-1:null,
+    turnoverGrowth15m:turnover/previousTurnover-1,
+    obvDirection:calculateObvDirection(ordered),
+    higherLow15m:structure15m.higherLow,
+    resistanceProximity15m:structure15m.resistanceProximity,
+    structure1h,
+    highDistance1h:highDistance1h(ordered),
+    pullbackRebreak1h:structure15m.higherLow&&structure1h==="sideways_breakout"
+  };
+}
+
+function benchmarkRelativeScore(relative15m,relative60m){
+  const r15=Number(relative15m),r60=Number(relative60m);
+  let score=0;
+  if(Number.isFinite(r15))score+=clamp01((r15+.002)/.018)*50;
+  if(Number.isFinite(r60))score+=clamp01((r60+.004)/.036)*50;
+  return score;
+}
+
+function annotateBtcEthIndependence(metrics){
+  const rows=(metrics||[]).filter(Boolean);
+  const btc=rows.find(row=>row.market==="KRW-BTC");
+  const eth=rows.find(row=>row.market==="KRW-ETH");
+  const benchmarkAvailable=!!btc&&!!eth&&Number.isFinite(Number(btc.return15m))&&Number.isFinite(Number(eth.return15m))&&Number.isFinite(Number(btc.return60m))&&Number.isFinite(Number(eth.return60m));
+  return rows.map(row=>{
+    if(BASE_ASSET_MARKETS.has(row.market)){
+      return {...row,dependencyClass:"BASE_ASSET",benchmarkAvailable,btcEthIndependent:false,independenceScore:0,sameDayActivationScore:0,sameDayReady:false,holdingHorizon:"BASE_ASSET"};
+    }
+    if(!benchmarkAvailable){
+      return {...row,dependencyClass:"BENCHMARK_UNKNOWN",benchmarkAvailable:false,btcEthIndependent:false,independenceScore:0,sameDayActivationScore:0,sameDayReady:false,holdingHorizon:"INTRADAY_1D"};
+    }
+    const rel5Btc=Number(row.return5m)-Number(btc.return5m),rel5Eth=Number(row.return5m)-Number(eth.return5m);
+    const rel15Btc=Number(row.return15m)-Number(btc.return15m),rel15Eth=Number(row.return15m)-Number(eth.return15m);
+    const rel60Btc=Number(row.return60m)-Number(btc.return60m),rel60Eth=Number(row.return60m)-Number(eth.return60m);
+    const rel15Floor=Math.min(rel15Btc,rel15Eth),rel60Floor=Math.min(rel60Btc,rel60Eth);
+    const relativeScore=(benchmarkRelativeScore(rel15Btc,rel60Btc)+benchmarkRelativeScore(rel15Eth,rel60Eth))/2;
+    const ownFlow=row.turnoverGrowth15m>=.25&&Number(row.obvDirection)>0;
+    const relative15Ok=rel15Floor>=.0025;
+    const relative60Ok=rel60Floor>=.004;
+    const benchmarkWeak=(Number(btc.return15m)<=0||Number(eth.return15m)<=0);
+    const antiBetaProof=benchmarkWeak&&Number(row.return15m)>=.003&&rel15Floor>=.004;
+    const btcEthIndependent=ownFlow&&relative15Ok&&(relative60Ok||antiBetaProof);
+
+    let activation=0;
+    if(rel5Btc>=0&&rel5Eth>=0)activation+=10;
+    if(relative15Ok)activation+=22;
+    else if(rel15Floor>0)activation+=10;
+    if(relative60Ok)activation+=18;
+    else if(rel60Floor>0)activation+=8;
+    if(row.turnoverGrowth15m>=1)activation+=20;
+    else if(row.turnoverGrowth15m>=.5)activation+=16;
+    else if(row.turnoverGrowth15m>=.25)activation+=10;
+    if(Number(row.obvDirection)>=.25)activation+=14;
+    else if(Number(row.obvDirection)>0)activation+=8;
+    if(row.higherLow15m===true)activation+=8;
+    if(row.structure1h==="sideways_breakout")activation+=8;
+    else if(row.structure1h==="uptrend")activation+=5;
+    activation=Math.max(0,Math.min(100,activation));
+
+    const return15=Number(row.return15m),return5=Number(row.return5m);
+    const sameDayReady=btcEthIndependent&&activation>=65&&return15>=.002&&return15<.07&&return5>=-.002;
+    const dependencyClass=btcEthIndependent?"BTC_ETH_INDEPENDENT":(relative15Ok||relative60Ok?"RELATIVE_STRENGTH_INCOMPLETE":"BTC_ETH_DEPENDENT");
+    const independenceScore=Math.max(0,Math.min(100,relativeScore+(ownFlow?10:0)+(antiBetaProof?10:0)));
+
+    return {
+      ...row,
+      benchmarkAvailable:true,
+      dependencyClass,
+      btcEthIndependent,
+      independenceScore:+independenceScore.toFixed(2),
+      sameDayActivationScore:+activation.toFixed(2),
+      sameDayReady,
+      holdingHorizon:"INTRADAY_1D",
+      activationWindow:"1-6H",
+      relative5mVsBtc:+rel5Btc.toFixed(6),
+      relative5mVsEth:+rel5Eth.toFixed(6),
+      relative15mVsBtc:+rel15Btc.toFixed(6),
+      relative15mVsEth:+rel15Eth.toFixed(6),
+      relative60mVsBtc:+rel60Btc.toFixed(6),
+      relative60mVsEth:+rel60Eth.toFixed(6),
+      benchmarkBtcReturn15m:+Number(btc.return15m).toFixed(6),
+      benchmarkEthReturn15m:+Number(eth.return15m).toFixed(6),
+      benchmarkBtcReturn60m:+Number(btc.return60m).toFixed(6),
+      benchmarkEthReturn60m:+Number(eth.return60m).toFixed(6)
+    };
+  });
 }
 
 function percentileRanks(rows,key){const sorted=rows.map(row=>Number(row[key])||0).slice().sort((a,b)=>a-b);const scale=Math.max(1,sorted.length-1);return new Map(rows.map(row=>[row.market,sorted.indexOf(Number(row[key])||0)/scale]));}
@@ -287,14 +379,53 @@ async function enrichLatePumpRisk(rows,{fetchImpl=fetch,limit=DAILY_RISK_TOP_N}=
   return rows.map(row=>byMarket.get(row.market)||row).sort((a,b)=>b.score-a.score||b.turnoverGrowth15m-a.turnoverGrowth15m);
 }
 
-function rankCandidates(metrics,limit=3,derivatives={}){return scoreCandidates(metrics,derivatives).filter(row=>row.score>=50&&(row.state==="SCOUT"||row.state==="ENTRY")).slice(0,limit);}
+function executionPriority(row){
+  const score=Number(row?.score)||0,independence=Number(row?.independenceScore)||0,activation=Number(row?.sameDayActivationScore)||0;
+  return score*.55+independence*.20+activation*.25;
+}
+
+function enforceSingleIntradayEntry(rows){
+  let entryTaken=false;
+  return (rows||[]).map(row=>{
+    let state=row.state;
+    const eligible=row.btcEthIndependent===true&&row.sameDayReady===true&&state==="ENTRY"&&row.highChaseRisk!==true&&row.latePumpRisk!==true;
+    let entrySlot=null;
+    if(eligible&&!entryTaken){entryTaken=true;entrySlot=1;}
+    else if(state==="ENTRY")state="SCOUT";
+    return {...row,state,entrySlot,sameDayEntry:entrySlot===1,sameDayExitRequired:true,holdingHorizon:"INTRADAY_1D",activationWindow:"1-6H"};
+  });
+}
+
+function rankCandidates(metrics,limit=3,derivatives={}){
+  return scoreCandidates(metrics,derivatives).filter(row=>row.score>=50&&(row.state==="SCOUT"||row.state==="ENTRY")).slice(0,limit);
+}
 function resistanceScore(proximity){if(!Number.isFinite(proximity))return .25;if(proximity>=-.03&&proximity<=.01)return 1;if(proximity>-.08&&proximity<-.03)return .6;if(proximity>.01&&proximity<=.03)return .4;return 0;}
 
 async function scanPrePump({fetchImpl=fetch,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),batchSize=BATCH_SIZE,batchDelayMs=BATCH_DELAY_MS,derivatives={}}={}){
   const markets=await fetchJson(`${UPBIT_BASE}/v1/market/all?isDetails=false`,{fetchImpl}),krwMarkets=(markets||[]).map(row=>row.market).filter(market=>market?.startsWith("KRW-")).sort(),metrics=[];
-  for(let index=0;index<krwMarkets.length;index+=batchSize){const batch=krwMarkets.slice(index,index+batchSize),results=await Promise.allSettled(batch.map(async market=>{const url=`${UPBIT_BASE}/v1/candles/minutes/1?market=${encodeURIComponent(market)}&count=${CANDLES_PER_MARKET}`;return calculateMetrics(market,await fetchJson(url,{fetchImpl}));}));for(const result of results)if(result.status==="fulfilled"&&result.value)metrics.push(result.value);if(index+batchSize<krwMarkets.length)await sleep(batchDelayMs);}
-  const enriched=await enrichLatePumpRisk(scoreCandidates(metrics,derivatives),{fetchImpl});
-  return enriched.filter(row=>row.score>=50&&(row.state==="SCOUT"||row.state==="ENTRY")&&(!row.dailyIgnitionAvailable||row.dailyIgnitionScore>=48)).slice(0,3);
+  for(let index=0;index<krwMarkets.length;index+=batchSize){
+    const batch=krwMarkets.slice(index,index+batchSize),results=await Promise.allSettled(batch.map(async market=>{
+      const url=`${UPBIT_BASE}/v1/candles/minutes/1?market=${encodeURIComponent(market)}&count=${CANDLES_PER_MARKET}`;
+      return calculateMetrics(market,await fetchJson(url,{fetchImpl}));
+    }));
+    for(const result of results)if(result.status==="fulfilled"&&result.value)metrics.push(result.value);
+    if(index+batchSize<krwMarkets.length)await sleep(batchDelayMs);
+  }
+
+  const benchmarked=annotateBtcEthIndependence(metrics);
+  const scored=scoreCandidates(benchmarked,derivatives)
+    .filter(row=>!BASE_ASSET_MARKETS.has(row.market))
+    .filter(row=>row.benchmarkAvailable===true&&row.btcEthIndependent===true);
+  const enriched=await enrichLatePumpRisk(scored,{fetchImpl});
+  const candidates=enriched
+    .filter(row=>row.score>=50&&(row.state==="SCOUT"||row.state==="ENTRY"))
+    .filter(row=>row.btcEthIndependent===true)
+    .filter(row=>!row.dailyIgnitionAvailable||row.dailyIgnitionScore>=48)
+    .map(row=>({...row,executionPriority:+executionPriority(row).toFixed(2)}))
+    .sort((a,b)=>b.executionPriority-a.executionPriority||b.sameDayActivationScore-a.sameDayActivationScore||b.score-a.score)
+    .slice(0,3);
+
+  return enforceSingleIntradayEntry(candidates);
 }
 
-module.exports={calculate15mStructure,calculateAbsorptionScore,calculateMetrics,calculateObvDirection,calculateObvPersistence,calculateOverheadSupply,calculateTurnoverPersistence,classify1hStructure,dailyIgnition,derivativeScore,enrichLatePumpRisk,fetchJson,highChasePenalty,highDistance1h,latePumpRisk,rankCandidates,resistanceScore,rsi14,scanPrePump,scoreCandidates,stateOf,sumTurnover};
+module.exports={annotateBtcEthIndependence,benchmarkRelativeScore,calculate15mStructure,calculateAbsorptionScore,calculateMetrics,calculateObvDirection,calculateObvPersistence,calculateOverheadSupply,calculateTurnoverPersistence,classify1hStructure,dailyIgnition,derivativeScore,enforceSingleIntradayEntry,enrichLatePumpRisk,executionPriority,fetchJson,highChasePenalty,highDistance1h,latePumpRisk,rankCandidates,resistanceScore,rsi14,scanPrePump,scoreCandidates,stateOf,sumTurnover};
