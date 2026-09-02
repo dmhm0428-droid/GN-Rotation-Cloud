@@ -59,7 +59,7 @@ test("scans every KRW market with injected quotation responses and no order API"
   const result=await scanPrePump({fetchImpl,sleep:async()=>{},batchSize:8});
   assert.equal(requested.filter(url=>url.includes("/candles/")).length,2);
   assert.ok(requested.every(url=>!url.includes("/orders")));
-  assert.deepEqual(result.map(row=>row.market),["KRW-AAA"]);
+  assert.deepEqual(result,[]); // fail closed when BTC/ETH benchmarks are unavailable
 });
 
 test("returns at most three candidates",()=>{
