@@ -18,6 +18,8 @@ services:
         value: gn
       - key: DASHBOARD_PASSWORD
         generateValue: true
+      - key: NODE_OPTIONS
+        value: "--require=./src/pre-pump-dashboard-hotfix.js"
       - key: AI_ANALYSIS_ENABLED
         value: "false"
       - key: AI_PAID_REQUESTS_ENABLED
@@ -86,8 +88,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
 
-# Market and Pre-Pump collection are scheduled canonically in Supabase:
-# - gn_market_collector_5m
-# - gn_pre_pump_scanner_15m
-# The scanner now stores only immediate-entry PASS rows as TOP3.
-# Paid 5AI verification runs only on a new mechanically qualified snapshot and skips duplicates/no-candidate runs.
+# Market and Pre-Pump collection are scheduled canonically in Supabase.
+# Dashboard hotfix promotes only conservative SCOUTs to 15m early-entry when all risk gates pass
+# and the sole remaining blocker is repeat/fresh-transition confirmation.
+# Approved intraday signals remain visible and continue live-price tracking after they leave TOP3.
