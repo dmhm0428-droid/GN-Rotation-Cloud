@@ -16,6 +16,7 @@ jobs:
           node-version: '22'
       - run: npm install --ignore-scripts
       - run: node --check src/start.js
+      - run: node --check src/dashboard-ui-health-v1.js
       - run: node --check src/dashboard-big-picture-v1.js
       - run: node --check src/precursor-dashboard.js
       - run: node --check src/dashboard-precursor-top3-v1.js
@@ -23,11 +24,11 @@ jobs:
       - run: node --check src/dashboard-hard-rescue.js
       - run: node --check src/final-dashboard-patch.js
       - run: node --check src/dashboard-partial-loading-v1.js
-      - run: node --test test/dashboard-resilience.test.js
+      - run: node --test test/dashboard-resilience.test.js test/dashboard-injected-script.test.js
       - name: Verify Render build configuration
         run: |
           grep -q 'buildCommand: npm install --omit=dev' render.yaml
-          grep -q 'healthCheckPath: /health' render.yaml
+          grep -q 'healthCheckPath: /health/ui' render.yaml
       - name: Boot server and verify authenticated canonical dashboard shell
         shell: bash
         run: |
@@ -43,12 +44,13 @@ jobs:
           trap cleanup EXIT
           ok=0
           for i in {1..30}; do
-            if curl -fsS --max-time 2 http://127.0.0.1:3100/health > /tmp/health.json; then ok=1; break; fi
+            if curl -fsS --max-time 2 http://127.0.0.1:3100/health/ui > /tmp/ui-health.json; then ok=1; break; fi
             if ! kill -0 "$pid" 2>/dev/null; then echo 'GN server exited during startup'; cat /tmp/gn-server.log; exit 1; fi
             sleep 0.5
           done
-          if [ "$ok" != "1" ]; then echo 'GN server did not become healthy'; cat /tmp/gn-server.log; exit 1; fi
-          grep -q '"ok":true' /tmp/health.json || exit 1
+          if [ "$ok" != "1" ]; then echo 'GN UI health did not become ready'; cat /tmp/gn-server.log; exit 1; fi
+          grep -q '"ok":true' /tmp/ui-health.json || exit 1
+          grep -q 'GN_UI_CANONICAL_20260903_V1' /tmp/ui-health.json || exit 1
           curl -fsS --max-time 3 http://127.0.0.1:3100/login > /tmp/login.html || { cat /tmp/gn-server.log; exit 1; }
           grep -q 'GN PIVOT' /tmp/login.html || exit 1
           grep -q '로그인' /tmp/login.html || exit 1
@@ -77,29 +79,42 @@ jobs:
       - run: npm test
 
   live-render-diagnostic:
-    # Live deployment health must still be checked when unrelated legacy strategy tests fail.
     needs: [dashboard-safety]
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
     env:
       RENDER_PUBLIC_URL: ${{ vars.RENDER_PUBLIC_URL }}
     steps:
-      - name: Verify configured live Render dashboard
+      - uses: actions/checkout@v4
+      - name: Verify live Render canonical UI chain
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${RENDER_PUBLIC_URL:-}" ]; then
-            echo "RENDER_PUBLIC_URL repository variable is not configured; live-host probe skipped without guessing hostnames."
-            exit 0
-          fi
           base="${RENDER_PUBLIC_URL%/}"
+          if [ -z "$base" ]; then
+            service="$(awk '/^[[:space:]]+- type: web/{web=1;next} web&&/^[[:space:]]+name:/{print $2;exit}' render.yaml)"
+            test -n "$service"
+            base="https://${service}.onrender.com"
+            echo "RENDER_PUBLIC_URL missing; using deterministic Blueprint service URL $base"
+          fi
           case "$base" in
             https://*.onrender.com|https://*) ;;
-            *) echo "RENDER_PUBLIC_URL must be an https URL"; exit 1;;
+            *) echo "Render URL must be https"; exit 1;;
           esac
-          curl -L -fsS --connect-timeout 5 --max-time 20 "$base/health" -o /tmp/health
-          grep -q '"ok"' /tmp/health
+          ok=0
+          for i in {1..24}; do
+            if curl -L -fsS --connect-timeout 5 --max-time 12 "$base/health/ui" -o /tmp/ui-health; then
+              if grep -q '"ok":true' /tmp/ui-health && grep -q 'GN_UI_CANONICAL_20260903_V1' /tmp/ui-health; then ok=1; break; fi
+            fi
+            echo "waiting for Render canonical UI deployment ($i/24)"
+            sleep 15
+          done
+          if [ "$ok" != "1" ]; then
+            echo "LIVE_RENDER_UI_NOT_READY=$base"
+            test -f /tmp/ui-health && cat /tmp/ui-health || true
+            exit 1
+          fi
           curl -L -fsS --connect-timeout 5 --max-time 20 "$base/login" -o /tmp/login
           grep -q 'GN PIVOT' /tmp/login
           grep -q '로그인' /tmp/login
-          echo "LIVE_RENDER_OK=$base"
+          echo "LIVE_RENDER_UI_OK=$base"
