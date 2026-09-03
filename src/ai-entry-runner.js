@@ -58,6 +58,31 @@ async function buildEvidenceBundle(db,crypto){
   };
 }
 function consensusVerified(c){return c?.verdict==="VERIFIED"&&c?.all_five_ok===true&&Number(c?.providers_success)===5&&Number(c?.evidence_quality)>=1&&Number(c?.conflict_count||0)===0;}
+function failureClass(code){
+  const c=String(code||"").toUpperCase();
+  if(/TIMEOUT|UNAVAILABLE|HTTP_50[023]|OVERLOADED|SERVICE/.test(c))return "UPSTREAM_OUTAGE";
+  if(/BILLING|QUOTA|CREDIT|COST_LIMIT/.test(c))return "BILLING_OR_QUOTA";
+  if(/MISSING_KEY|AUTH|UNAUTHORIZED|FORBIDDEN/.test(c))return "CONFIG_OR_AUTH";
+  if(/INVALID_RESPONSE/.test(c))return "BAD_RESPONSE";
+  return "PROVIDER_ERROR";
+}
+async function updateAiProviderHealth(db,results){
+  const now=new Date().toISOString();
+  for(const r of results){
+    const provider=String(r.provider||"").toLowerCase();if(!provider)continue;
+    const ok=r.status==="success";
+    const {data:hist}=await db.from("gn_ai_analyses").select("status,error_code,created_at").eq("provider",provider).order("created_at",{ascending:false}).limit(3);
+    let consecutive=0;for(const h of hist||[]){if(String(h.status)==="error")consecutive++;else break;}
+    const cls=ok?null:failureClass(r.errorCode);
+    const status=ok?"success":(consecutive>=3&&cls==="UPSTREAM_OUTAGE"?"down":"degraded");
+    const {data:prev}=await db.from("gn_data_provider_status").select("last_success_at").eq("provider",`ai_${provider}`).maybeSingle();
+    await db.from("gn_data_provider_status").upsert({
+      provider:`ai_${provider}`,provider_type:"AI",status,last_success_at:ok?now:(prev?.last_success_at||null),last_attempt_at:now,
+      data_quality:ok?100:Math.max(0,100-consecutive*30),error:ok?null:(r.errorCode||"PROVIDER_ERROR"),
+      details:{model:r.model||null,consecutive_failures:consecutive,failure_class:cls,isolated:true,blocks_dashboard:false,blocks_five_ai_entry_gate:!ok}
+    },{onConflict:"provider"});
+  }
+}
 async function markRows(db,rows,consensus){
   const pass=consensusVerified(consensus);
   for(const row of rows){
@@ -78,6 +103,7 @@ async function main({env=process.env,db=dbFromEnv(env)}={}){
   const evidence=await buildEvidenceBundle(db,crypto);
   const results=await analyzeSnapshot(evidence,config);
   await storeAnalyses(db,results,crypto.ts);
+  await updateAiProviderHealth(db,results);
   const consensus=buildConsensus(results,crypto.ts);
   const stored=await storeConsensus(db,consensus);
   const promoted=await markRows(db,crypto.rows,consensus);
@@ -86,4 +112,4 @@ async function main({env=process.env,db=dbFromEnv(env)}={}){
 }
 
 if(require.main===module)main().catch(error=>{console.error(error?.code||error?.stack||error?.message||"AI_RUN_ERROR");process.exitCode=1;});
-module.exports={alreadyAudited,buildEvidenceBundle,consensusVerified,latestImmediateCrypto,main,markRows};
+module.exports={alreadyAudited,buildEvidenceBundle,consensusVerified,failureClass,latestImmediateCrypto,main,markRows,updateAiProviderHealth};
