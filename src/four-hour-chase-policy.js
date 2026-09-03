@@ -32,7 +32,12 @@ function analyzeSeries(rows,{kind="upbit"}={}){
   const candleExtended=candleReturnPct!=null&&candleReturnPct>=3;
   const conditions=[bollingerTop,nearSwingHigh,ma20Stretched,candleExtended];
   const hitCount=conditions.filter(Boolean).length;
-  const extreme=(bbPosition!=null&&bbPosition>=0.95)||(ma20StretchPct!=null&&ma20StretchPct>=5)||(candleReturnPct!=null&&candleReturnPct>=5);
+
+  // Narrow Bollinger bands can put a quiet +0.x% candle above the upper band even when the
+  // candidate still has ample swing-high headroom. Bollinger position alone must not create an
+  // "extreme" chase block; require real extension/near-high confirmation as well.
+  const bbExtreme=bbPosition!=null&&bbPosition>=0.95&&(nearSwingHigh||ma20Stretched||candleExtended);
+  const extreme=bbExtreme||(ma20StretchPct!=null&&ma20StretchPct>=5)||(candleReturnPct!=null&&candleReturnPct>=5);
   const blockTop3=extreme||hitCount>=2;
   const reasons=[];
   if(bollingerTop)reasons.push(`4H 볼린저 상단 ${(bbPosition*100).toFixed(0)}%`);
