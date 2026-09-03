@@ -16,6 +16,7 @@ jobs:
           node-version: '22'
       - run: npm install --ignore-scripts
       - run: node --check src/start.js
+      - run: node --check src/dashboard-scalp-failopen-v1.js
       - run: node --check src/dashboard-big-picture-v1.js
       - run: node --check src/precursor-dashboard.js
       - run: node --check src/dashboard-precursor-top3-v1.js
@@ -27,7 +28,7 @@ jobs:
         run: |
           grep -q 'buildCommand: npm install --omit=dev' render.yaml
           grep -q 'healthCheckPath: /health' render.yaml
-      - name: Boot server and verify public routes
+      - name: Boot server and verify authenticated dashboard shell
         shell: bash
         run: |
           set -euo pipefail
@@ -50,6 +51,15 @@ jobs:
           curl -fsS --max-time 3 http://127.0.0.1:3100/login > /tmp/login.html
           grep -q 'GN PIVOT' /tmp/login.html
           grep -q '로그인' /tmp/login.html
+          curl -fsS -c /tmp/cookies -b /tmp/cookies -X POST \
+            -d 'username=gn&password=local-smoke-password' \
+            -o /tmp/post-login -D /tmp/post-login-headers \
+            http://127.0.0.1:3100/login
+          curl -fsS -c /tmp/cookies -b /tmp/cookies http://127.0.0.1:3100/ > /tmp/dashboard.html
+          grep -q 'id="hero"' /tmp/dashboard.html
+          grep -q 'id="majors"' /tmp/dashboard.html
+          grep -q 'id="top3"' /tmp/dashboard.html
+          grep -q 'gn-scalp-failopen-v1' /tmp/dashboard.html
 
   legacy-regression-report:
     runs-on: ubuntu-latest
