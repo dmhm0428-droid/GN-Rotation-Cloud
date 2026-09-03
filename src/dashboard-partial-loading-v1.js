@@ -140,8 +140,11 @@ function stripLegacyGlobalLoaders(html){
   html=html.replace(/<script id="gn-hard-rescue-v2">[\s\S]*?<\/script>/,'');
   return html;
 }
+function isDashboardHtml(html){
+  return typeof html==="string"&&html.includes('id="decisionHero"')&&html.includes('id="retirementEtf"')&&html.includes('id="portfolio"');
+}
 function patchHtml(html){
-  if(typeof html!=="string"||!html.includes("<title>GN PIVOT</title>")||html.includes("gn-partial-loading-v1"))return html;
+  if(!isDashboardHtml(html)||html.includes("gn-partial-loading-v1"))return html;
   html=stripLegacyGlobalLoaders(html);
   return html.replace("</body>",SCRIPT+"</body>");
 }
