@@ -8,7 +8,7 @@ services:
     renderSubdomainPolicy: enabled
     buildCommand: npm install --omit=dev
     startCommand: npm start
-    healthCheckPath: /health
+    healthCheckPath: /health/ui
     envVars:
       - key: SUPABASE_URL
         sync: false
