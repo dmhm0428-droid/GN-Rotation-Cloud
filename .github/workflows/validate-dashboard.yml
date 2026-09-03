@@ -79,14 +79,17 @@ jobs:
       - run: npm test
 
   live-render-diagnostic:
+    # Diagnostic only. It must not block a Render service configured as "After CI Checks Pass",
+    # otherwise deployment and verification deadlock each other.
     needs: [dashboard-safety]
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 2
     env:
       RENDER_PUBLIC_URL: ${{ vars.RENDER_PUBLIC_URL }}
     steps:
       - uses: actions/checkout@v4
-      - name: Verify live Render canonical UI chain
+      - name: Probe live Render canonical UI chain without blocking deploy
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -97,24 +100,19 @@ jobs:
             base="https://${service}.onrender.com"
             echo "RENDER_PUBLIC_URL missing; using deterministic Blueprint service URL $base"
           fi
-          case "$base" in
-            https://*.onrender.com|https://*) ;;
-            *) echo "Render URL must be https"; exit 1;;
-          esac
-          ok=0
-          for i in {1..24}; do
-            if curl -L -fsS --connect-timeout 5 --max-time 12 "$base/health/ui" -o /tmp/ui-health; then
-              if grep -q '"ok":true' /tmp/ui-health && grep -q 'GN_UI_CANONICAL_20260903_V1' /tmp/ui-health; then ok=1; break; fi
-            fi
-            echo "waiting for Render canonical UI deployment ($i/24)"
-            sleep 15
-          done
-          if [ "$ok" != "1" ]; then
-            echo "LIVE_RENDER_UI_NOT_READY=$base"
-            test -f /tmp/ui-health && cat /tmp/ui-health || true
-            exit 1
+          ui_code="$(curl -L -sS -o /tmp/ui-health -w '%{http_code}' --connect-timeout 5 --max-time 12 "$base/health/ui" || true)"
+          health_code="$(curl -L -sS -o /tmp/health -w '%{http_code}' --connect-timeout 5 --max-time 12 "$base/health" || true)"
+          login_code="$(curl -L -sS -o /tmp/login -w '%{http_code}' --connect-timeout 5 --max-time 12 "$base/login" || true)"
+          echo "LIVE_CODES ui=$ui_code health=$health_code login=$login_code"
+          if [ "$ui_code" = "200" ] && grep -q '"ok":true' /tmp/ui-health && grep -q 'GN_UI_CANONICAL_20260903_V1' /tmp/ui-health; then
+            grep -q 'GN PIVOT' /tmp/login
+            echo "LIVE_RENDER_UI_OK=$base"
+            exit 0
           fi
-          curl -L -fsS --connect-timeout 5 --max-time 20 "$base/login" -o /tmp/login
-          grep -q 'GN PIVOT' /tmp/login
-          grep -q '로그인' /tmp/login
-          echo "LIVE_RENDER_UI_OK=$base"
+          if [ "$health_code" = "200" ] || [ "$login_code" = "200" ]; then
+            echo "::warning::Render service is reachable but still serving an older dashboard revision; CI is allowed to pass so checksPass auto-deploy can proceed."
+          else
+            echo "::warning::Render Blueprint URL is not reachable yet; CI is allowed to pass so deployment is not blocked."
+          fi
+          echo "LIVE_RENDER_UI_STALE=$base"
+          exit 1
