@@ -16,19 +16,19 @@ jobs:
           node-version: '22'
       - run: npm install --ignore-scripts
       - run: node --check src/start.js
-      - run: node --check src/dashboard-scalp-failopen-v1.js
       - run: node --check src/dashboard-big-picture-v1.js
       - run: node --check src/precursor-dashboard.js
       - run: node --check src/dashboard-precursor-top3-v1.js
       - run: node --check src/dashboard-resilience-patch.js
       - run: node --check src/dashboard-hard-rescue.js
       - run: node --check src/final-dashboard-patch.js
+      - run: node --check src/dashboard-partial-loading-v1.js
       - run: node --test test/dashboard-resilience.test.js
       - name: Verify Render build configuration
         run: |
           grep -q 'buildCommand: npm install --omit=dev' render.yaml
           grep -q 'healthCheckPath: /health' render.yaml
-      - name: Boot server and verify authenticated dashboard shell
+      - name: Boot server and verify authenticated canonical dashboard shell
         shell: bash
         run: |
           set -uo pipefail
@@ -57,10 +57,13 @@ jobs:
             -o /tmp/post-login -D /tmp/post-login-headers \
             http://127.0.0.1:3100/login || { cat /tmp/gn-server.log; exit 1; }
           curl -fsS -c /tmp/cookies -b /tmp/cookies http://127.0.0.1:3100/ > /tmp/dashboard.html || { cat /tmp/gn-server.log; exit 1; }
-          grep -q 'id="hero"' /tmp/dashboard.html || { echo 'hero missing'; exit 1; }
-          grep -q 'id="majors"' /tmp/dashboard.html || { echo 'majors missing'; exit 1; }
+          grep -q 'id="decisionHero"' /tmp/dashboard.html || { echo 'decisionHero missing'; exit 1; }
+          grep -q 'id="leaders"' /tmp/dashboard.html || { echo 'leaders missing'; exit 1; }
           grep -q 'id="top3"' /tmp/dashboard.html || { echo 'top3 missing'; exit 1; }
-          grep -q 'gn-scalp-failopen-v1' /tmp/dashboard.html || { echo 'fail-open loader missing'; exit 1; }
+          grep -q 'id="retirementEtf"' /tmp/dashboard.html || { echo 'retirementEtf missing'; exit 1; }
+          grep -q 'id="portfolio"' /tmp/dashboard.html || { echo 'portfolio missing'; exit 1; }
+          grep -q 'gn-partial-loading-v1' /tmp/dashboard.html || { echo 'partial loader missing'; exit 1; }
+          grep -q 'gn-leading-top3-v2-ui' /tmp/dashboard.html || { echo 'single TOP3 renderer missing'; exit 1; }
 
   legacy-regression-report:
     runs-on: ubuntu-latest
