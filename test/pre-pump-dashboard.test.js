@@ -43,19 +43,20 @@ test("approved signal repeats as entry-maintain while price stays in band",()=>{
   assert.equal(state.repeatCount,3);
 });
 
-test("breakout does not disappear; it becomes breakout-hold and blocks fresh chasing",()=>{
+test("+8% breakout activates first profit lock and blocks fresh chasing",()=>{
   const signal=approved();
   const current={...signal,score:79,status:"SCOUT",krw_price:108,ts:new Date().toISOString()};
   const state=continuityState({signal,current,market:{score:66,delta:5},repeatCount:4});
-  assert.equal(state.action,"돌파보유");
+  assert.equal(state.action,"1차익절");
   assert.equal(state.newEntryAllowed,false);
+  assert.equal(state.runnerAllowed,true);
 });
 
-test("NO_CHASE after an approved entry becomes sell-preparation, not silent disappearance",()=>{
+test("NO_CHASE after +8% MFE protects profit instead of reopening entry",()=>{
   const signal=approved();
   const current={...signal,status:"NO_CHASE",krw_price:110,ts:new Date().toISOString()};
   const state=continuityState({signal,current,market:{score:64,delta:2},repeatCount:5});
-  assert.equal(state.action,"매도준비");
+  assert.equal(state.action,"수익보호");
   assert.equal(state.newEntryAllowed,false);
 });
 
