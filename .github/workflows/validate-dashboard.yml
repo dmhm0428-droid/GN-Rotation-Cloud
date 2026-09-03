@@ -63,7 +63,8 @@ jobs:
       - run: npm test
 
   live-render-diagnostic:
-    needs: [dashboard-safety, legacy-regression-report]
+    # Live deployment health must still be checked when unrelated legacy strategy tests fail.
+    needs: [dashboard-safety]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
