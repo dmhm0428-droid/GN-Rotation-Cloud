@@ -32,13 +32,16 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
-// Cleanup/watchlist is first so its UI normalization runs last, after the canonical dashboard body.
+// Partial loading is first so it becomes the final response layer: unrelated sections render
+// independently and a failed paid provider can never hold the whole dashboard in a loading state.
+// Cleanup/watchlist follows so its UI normalization still runs after the canonical dashboard body.
 // Crypto TOP3 UI has ONE owner only: dashboard-leading-top3-v2.
 // Legacy crypto UI layers (immediate-entry-v2 / precursor-top3-v1 / top3-policy / strict 5AI gate)
 // are intentionally not preloaded because their browser MutationObservers/fetch wrappers race each
 // other and make the cards/status flicker. Current scanner V69 already persists row-level
 // SCOUT/ENTRY + entry_allowed, and leading-top3-v2 reads/revalidates those canonical DB rows.
 const preloads=[
+  "dashboard-partial-loading-v1.js",
   "dashboard-cleanup-watchlist-v1.js",
   "dashboard-leading-top3-v2.js",
   "dashboard-big-picture-v1.js",
