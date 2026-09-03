@@ -31,7 +31,7 @@ jobs:
       - name: Boot server and verify authenticated dashboard shell
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
           export SUPABASE_URL='http://127.0.0.1:9'
           export SUPABASE_SERVICE_ROLE_KEY='local-smoke-key'
           export DASHBOARD_USER='gn'
@@ -42,24 +42,25 @@ jobs:
           cleanup(){ kill "$pid" 2>/dev/null || true; }
           trap cleanup EXIT
           ok=0
-          for i in {1..20}; do
+          for i in {1..30}; do
             if curl -fsS --max-time 2 http://127.0.0.1:3100/health > /tmp/health.json; then ok=1; break; fi
+            if ! kill -0 "$pid" 2>/dev/null; then echo 'GN server exited during startup'; cat /tmp/gn-server.log; exit 1; fi
             sleep 0.5
           done
-          if [ "$ok" != "1" ]; then cat /tmp/gn-server.log; exit 1; fi
-          grep -q '"ok":true' /tmp/health.json
-          curl -fsS --max-time 3 http://127.0.0.1:3100/login > /tmp/login.html
-          grep -q 'GN PIVOT' /tmp/login.html
-          grep -q '로그인' /tmp/login.html
+          if [ "$ok" != "1" ]; then echo 'GN server did not become healthy'; cat /tmp/gn-server.log; exit 1; fi
+          grep -q '"ok":true' /tmp/health.json || exit 1
+          curl -fsS --max-time 3 http://127.0.0.1:3100/login > /tmp/login.html || { cat /tmp/gn-server.log; exit 1; }
+          grep -q 'GN PIVOT' /tmp/login.html || exit 1
+          grep -q '로그인' /tmp/login.html || exit 1
           curl -fsS -c /tmp/cookies -b /tmp/cookies -X POST \
             -d 'username=gn&password=local-smoke-password' \
             -o /tmp/post-login -D /tmp/post-login-headers \
-            http://127.0.0.1:3100/login
-          curl -fsS -c /tmp/cookies -b /tmp/cookies http://127.0.0.1:3100/ > /tmp/dashboard.html
-          grep -q 'id="hero"' /tmp/dashboard.html
-          grep -q 'id="majors"' /tmp/dashboard.html
-          grep -q 'id="top3"' /tmp/dashboard.html
-          grep -q 'gn-scalp-failopen-v1' /tmp/dashboard.html
+            http://127.0.0.1:3100/login || { cat /tmp/gn-server.log; exit 1; }
+          curl -fsS -c /tmp/cookies -b /tmp/cookies http://127.0.0.1:3100/ > /tmp/dashboard.html || { cat /tmp/gn-server.log; exit 1; }
+          grep -q 'id="hero"' /tmp/dashboard.html || { echo 'hero missing'; exit 1; }
+          grep -q 'id="majors"' /tmp/dashboard.html || { echo 'majors missing'; exit 1; }
+          grep -q 'id="top3"' /tmp/dashboard.html || { echo 'top3 missing'; exit 1; }
+          grep -q 'gn-scalp-failopen-v1' /tmp/dashboard.html || { echo 'fail-open loader missing'; exit 1; }
 
   legacy-regression-report:
     runs-on: ubuntu-latest
