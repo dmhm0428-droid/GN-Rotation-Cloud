@@ -41,6 +41,7 @@ function runAssistant(){
 // other and make the cards/status flicker. Current scanner V69 already persists row-level
 // SCOUT/ENTRY + entry_allowed, and leading-top3-v2 reads/revalidates those canonical DB rows.
 const preloads=[
+  "dashboard-scalp-failopen-v1.js",
   "dashboard-partial-loading-v1.js",
   "dashboard-cleanup-watchlist-v1.js",
   "dashboard-leading-top3-v2.js",
