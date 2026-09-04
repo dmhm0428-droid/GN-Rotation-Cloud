@@ -18,28 +18,43 @@ async function latestPerKey(table,keyFn,limit=600){
  return out;
 }
 async function usQuote(item){const c=new AbortController(),timer=setTimeout(()=>c.abort(),4500);try{const r=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${item.symbol}?interval=1m&range=1d`,{headers:{"user-agent":"Mozilla/5.0 GN-PIVOT/1.0","accept":"application/json"},signal:c.signal});if(!r.ok)throw Error(`HTTP ${r.status}`);const p=await r.json(),m=p?.chart?.result?.[0]?.meta||{},price=Number(m.regularMarketPrice);return {...item,price:Number.isFinite(price)?price:null,tradedAt:m.regularMarketTime?new Date(m.regularMarketTime*1000).toISOString():null,source:"YAHOO_FINANCE_CHART"};}catch(e){return {...item,price:null,tradedAt:null,source:"UNAVAILABLE",error:String(e?.name==="AbortError"?"QUOTE_TIMEOUT":e?.message||e)}}finally{clearTimeout(timer)}}
-async function liveSummary(req,res){try{
- const {data:runs}=await db.from("gn_runs").select("id,started_at,status,source_status").order("started_at",{ascending:false}).limit(40);const run=(runs||[]).find(r=>String(r?.source_status?.source||"").includes("pre_pump_scanner"))||null;
- const cutoff=new Date(Date.now()-15*60*1000).toISOString();
- const [reps,assets,sectors,cryptoR,consR,aiSoftware]=await Promise.all([
-   latestPerKey("gn_representatives",r=>r?.sector?`${r.asset_class||"UNKNOWN"}:${r.sector}`:(r?.asset_class||null),800),
-   latestPerKey("gn_asset_flow_scores",r=>r?.asset_class||null,240),
-   latestPerKey("gn_sector_flow_scores",r=>`${r?.asset_class||"STOCK"}:${r?.sector||""}`,800),
-   db.from("gn_pre_pump_snapshots").select("*").gte("ts",cutoff).order("score",{ascending:false}).limit(80),
-   db.from("gn_ai_consensus").select("created_at,verdict,all_five_ok,providers_success,evidence_quality,conflict_count").order("created_at",{ascending:false}).limit(1).maybeSingle(),
-   Promise.all(AI_SOFTWARE.map(usQuote))
- ]);
- const seen=new Set(),radar=[];for(const row of cryptoR.data||[]){if(!row?.market||seen.has(row.market))continue;seen.add(row.market);radar.push(row);if(radar.length===3)break;}
- assets.sort((a,b)=>(Number(a.rank)||99)-(Number(b.rank)||99));sectors.sort((a,b)=>(Number(a.rank)||99)-(Number(b.rank)||99));
- res.set("Cache-Control","no-store");res.json({ts:new Date().toISOString(),run,reps,assets,sectors,cryptoRadar:radar,consensus:consR.data||null,kr:KR,aiSoftware,aiSoftwareRankVerified:false});
-}catch(e){res.status(500).json({error:String(e?.message||e)});}}
-const SCRIPT=`<script id="gn-live-summary-v7">(function(){
+function val(r,fallback){return r.status==="fulfilled"?r.value:fallback}
+async function liveSummary(req,res){
+ const warnings=[];
+ try{
+   const runQ=await db.from("gn_runs").select("id,started_at,status,source_status").order("started_at",{ascending:false}).limit(40);
+   if(runQ.error)warnings.push(`gn_runs:${runQ.error.message}`);
+   const run=(runQ.data||[]).find(r=>String(r?.source_status?.source||"").includes("pre_pump_scanner"))||null;
+   const cutoff=new Date(Date.now()-15*60*1000).toISOString();
+   const settled=await Promise.allSettled([
+     latestPerKey("gn_representatives",r=>r?.sector?`${r.asset_class||"UNKNOWN"}:${r.sector}`:(r?.asset_class||null),800),
+     latestPerKey("gn_asset_flow_scores",r=>r?.asset_class||null,240),
+     latestPerKey("gn_sector_flow_scores",r=>`${r?.asset_class||"STOCK"}:${r?.sector||""}`,800),
+     db.from("gn_pre_pump_snapshots").select("*").gte("ts",cutoff).order("score",{ascending:false}).limit(80),
+     db.from("gn_ai_consensus").select("created_at,verdict,all_five_ok,providers_success,evidence_quality,conflict_count").order("created_at",{ascending:false}).limit(1).maybeSingle(),
+     Promise.all(AI_SOFTWARE.map(usQuote))
+   ]);
+   settled.forEach((r,i)=>{if(r.status==="rejected")warnings.push(`source_${i}:${String(r.reason?.message||r.reason)}`)});
+   const reps=val(settled[0],[]),assets=val(settled[1],[]),sectors=val(settled[2],[]);
+   const cryptoR=val(settled[3],{data:[]}),consR=val(settled[4],{data:null}),aiSoftware=val(settled[5],AI_SOFTWARE.map(x=>({...x,price:null,source:"UNAVAILABLE"})));
+   if(cryptoR?.error)warnings.push(`crypto:${cryptoR.error.message}`);
+   if(consR?.error)warnings.push(`consensus:${consR.error.message}`);
+   const seen=new Set(),radar=[];for(const row of cryptoR?.data||[]){if(!row?.market||seen.has(row.market))continue;seen.add(row.market);radar.push(row);if(radar.length===3)break;}
+   assets.sort((a,b)=>(Number(a.rank)||99)-(Number(b.rank)||99));sectors.sort((a,b)=>(Number(a.rank)||99)-(Number(b.rank)||99));
+   res.set("Cache-Control","no-store");
+   return res.json({ts:new Date().toISOString(),run,reps,assets,sectors,cryptoRadar:radar,consensus:consR?.data||null,kr:KR,aiSoftware,aiSoftwareRankVerified:false,degraded:warnings.length>0,warnings});
+ }catch(e){
+   res.set("Cache-Control","no-store");
+   return res.status(200).json({ts:new Date().toISOString(),run:null,reps:[],assets:[],sectors:[],cryptoRadar:[],consensus:null,kr:KR,aiSoftware:AI_SOFTWARE.map(x=>({...x,price:null,source:"UNAVAILABLE"})),aiSoftwareRankVerified:false,degraded:true,warnings:[`live_summary:${String(e?.message||e)}`]});
+ }
+}
+const SCRIPT=`<script id="gn-live-summary-v8">(function(){
 function e(id){return document.getElementById(id)}function esc(v){return String(v==null?'':v).replace(/[&<>\"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]})}function n(v,d){var x=Number(v);return Number.isFinite(x)?x:d}function f(v){return Number.isFinite(Number(v))?Number(v).toFixed(1):'--'}function nf(v){return Number.isFinite(Number(v))?Number(v).toLocaleString():'--'}
 function badge(s){s=String(s||'').toUpperCase();if(s==='ENTRY')return ['ENTRY','good'];if(s==='SCOUT')return ['SCOUT','warn'];if(s==='NO_CHASE')return ['추격금지','bad'];if(s==='WAIT'||s==='DETECTED')return ['관찰','neutral'];if(s==='LEADER')return ['우위','good'];if(s==='WATCH')return ['관찰','warn'];if(s==='DEFENSIVE')return ['방어','bad'];return [s||'대기','neutral']}
 function leaders(d){var reps=d.reps||[],assets=d.assets||[],names={STOCK:'미국주식',KOREA_STOCK:'한국주식',CRYPTO:'크립토',BOND:'채권',GOLD:'금',COMMODITY:'원자재',CASH:'현금'},ks=['STOCK','KOREA_STOCK','CRYPTO','BOND','GOLD','COMMODITY','CASH'];return ks.map(function(k){if(k==='STOCK')return '<div class="leader"><div class="leaderTop"><span>미국주식 · AI 소프트웨어</span><b class="warn">순위 검증 대기</b></div><div class="leaderSymbol">MNDY · NOW · CRWD · DDOG</div><div class="leaderMeta">실적·사용량 매출 조건군 · 검증 점수 없이는 1등 미표시</div></div>';var a=assets.find(function(x){return x.asset_class===k})||{};var r=reps.filter(function(x){return x.asset_class===k}).sort(function(x,y){return n(y.total_score,0)-n(x.total_score,0)})[0]||{};var b=badge(r.action||a.action);return '<div class="leader"><div class="leaderTop"><span>'+names[k]+'</span><b class="'+b[1]+'">'+b[0]+'</b></div><div class="leaderSymbol">'+esc(r.symbol||'--')+'</div><div class="leaderMeta">점수 '+f(r.total_score!=null?r.total_score:a.flow_score)+(r.price!=null?' · '+nf(r.price):'')+'</div></div>'}).join('')}
-function sectors(d){var rows=d.aiSoftware||[];var title=document.querySelector('#sectors')?.closest('section')?.querySelector('.sectionTitle'),sub=document.querySelector('#sectors')?.closest('section')?.querySelector('.sub');if(title)title.textContent='AI 소프트웨어 실적·사용량 매출 섹터';if(sub)sub.textContent='후보군 4개 · 검증 점수 확보 전에는 순위 미표시';if(!rows.length)return '<div class="empty">AI 소프트웨어 데이터 없음</div>';return rows.map(function(r){return '<div class="sector"><div><small>AI SOFTWARE · 후보</small><b>'+esc(r.symbol)+' · '+esc(r.name)+'</b><small>'+esc(r.basis)+'</small></div><div><strong>검증 대기</strong><span class="warn">미순위</span><small>'+(r.price!=null?'$'+nf(r.price):'가격 확인중')+'</small></div></div>'}).join('')}
-async function load(){try{var r=await fetch('/api/live-summary?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);var d=await r.json();if(e('leaders'))e('leaders').innerHTML=leaders(d);if(e('sectors'))e('sectors').innerHTML=sectors(d);if(e('updated'))e('updated').textContent='실시간 검증 · '+new Date(d.ts).toLocaleTimeString()+' · 15초 자동';}catch(err){if(e('updated'))e('updated').textContent='라이브 표시 재조회 중 · '+new Date().toLocaleTimeString()}}
+function sectors(d){var rows=d.aiSoftware||[];var title=document.querySelector('#sectors')?.closest('section')?.querySelector('.sectionTitle'),sub=document.querySelector('#sectors')?.closest('section')?.querySelector('.sub');if(title)title.textContent='AI 소프트웨어 실적·사용량 매출 섹터';if(sub)sub.textContent='후보군 4개 · 검증 점수 확보 전에는 순위 미표시';if(!rows.length)return '<div class="empty">AI 소프트웨어 데이터 없음</div>';return rows.map(function(r){return '<div class="sector"><div><small>AI SOFTWARE · 후보</small><b>'+esc(r.symbol)+' · '+esc(r.name)+'</b><small>'+esc(r.basis)+'</small></div><div><strong>검증 대기</strong><span class="warn">미순위</span><small>'+(r.price!=null?'$'+nf(r.price):'가격 확인중')+'</small></div></div>').join('')}
+async function load(){try{var r=await fetch('/api/live-summary?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);var d=await r.json();if(e('leaders'))e('leaders').innerHTML=leaders(d);if(e('sectors'))e('sectors').innerHTML=sectors(d);if(e('updated'))e('updated').textContent=(d.degraded?'부분 데이터 · ':'실시간 검증 · ')+new Date(d.ts).toLocaleTimeString()+' · 15초 자동';}catch(err){if(e('updated'))e('updated').textContent='라이브 표시 재조회 중 · '+new Date().toLocaleTimeString()}}
 setTimeout(load,300);setInterval(load,15000);window.gnLiveSummary=load;})();</script>`;
-function patchHtml(html){if(typeof html!=="string"||!html.includes("<title>GN PIVOT</title>")||html.includes("gn-live-summary-v7"))return html;return html.replace("</body>",SCRIPT+"</body>");}
+function patchHtml(html){if(typeof html!=="string"||!html.includes("<title>GN PIVOT</title>")||html.includes("gn-live-summary-v8"))return html;return html.replace("</body>",SCRIPT+"</body>");}
 function wrappedExpress(...args){const app=previousExpress(...args);app.get("/api/live-summary",liveSummary);app.use((req,res,next)=>{const send=res.send.bind(res);res.send=function(body){return send(patchHtml(body))};next()});return app;}
 Object.assign(wrappedExpress,previousExpress);require.cache[expressPath].exports=wrappedExpress;
