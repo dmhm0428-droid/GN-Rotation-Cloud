@@ -1,7 +1,8 @@
 "use strict";
 
-// Final fail-open UI loader for GN PIVOT.
-// One slow/failed provider must never keep unrelated dashboard sections in a global loading state.
+// Safe compatibility layer for GN PIVOT partial loading.
+// The authoritative dashboard owns rendering. This layer must never overwrite valid
+// leader/TOP3/sector/ETF/portfolio DOM with placeholder text.
 const expressPath=require.resolve("express");
 const previousExpress=require("express");
 const crypto=require("node:crypto");
@@ -28,52 +29,10 @@ async function providerStatus(req,res){
 }
 
 const SCRIPT=`<style id="gn-partial-loading-style-v1">
-.gnProviderWarn{color:#ffd166!important}.gnProviderBad{color:#ff8b8b!important}.gnSectionWait{color:#9aa7b4}.gnSectionError{color:#ff9aa3}.gnStale{opacity:.92}.gnStaleNote{font-size:12px;color:#ffd166;margin-top:6px}
+.gnProviderWarn{color:#ffd166!important}.gnProviderBad{color:#ff8b8b!important}
 </style><script id="gn-partial-loading-v1">(function(){
-  var generation=0,flowData=null,stockData={items:[]},providerData=null;
-  var sectionState={flow:'idle',stocks:'idle',etf:'idle',portfolio:'idle',providers:'idle'};
-  var sectionError={};
-  var CACHE_PREFIX='gn_pivot_cache_v2_';
+  var providerData=null;
   function byId(id){return document.getElementById(id)}
-  function setText(id,text){var e=byId(id);if(e)e.textContent=text}
-  function setHtml(id,html){var e=byId(id);if(e)e.innerHTML=html}
-  function esc(v){return String(v==null?'':v).replace(/[&<>\\"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\\"':'&quot;',"'":'&#39;'}[c]})}
-  function cachePut(key,data){try{localStorage.setItem(CACHE_PREFIX+key,JSON.stringify({ts:Date.now(),data:data}))}catch(e){}}
-  function cacheGet(key,maxAge){try{var raw=localStorage.getItem(CACHE_PREFIX+key);if(!raw)return null;var x=JSON.parse(raw);if(!x||!x.data)return null;if(maxAge&&Date.now()-Number(x.ts||0)>maxAge)return null;return x}catch(e){return null}}
-  function markStale(id,ts,msg){var e=byId(id);if(!e)return;e.classList.add('gnStale');var n=e.querySelector('[data-gn-stale-note="1"]');if(n)n.remove();n=document.createElement('div');n.className='gnStaleNote';n.setAttribute('data-gn-stale-note','1');n.textContent=(msg||'마지막 정상값 표시')+(ts?' · '+new Date(ts).toLocaleTimeString():'');e.appendChild(n)}
-  function clearStale(id){var e=byId(id);if(!e)return;e.classList.remove('gnStale');var n=e.querySelector('[data-gn-stale-note="1"]');if(n)n.remove()}
-  function statusLine(){
-    var keys=['flow','stocks','etf','portfolio'];
-    var ok=keys.filter(function(k){return sectionState[k]==='ok'}).length;
-    var loading=keys.filter(function(k){return sectionState[k]==='loading'}).length;
-    var failed=keys.filter(function(k){return sectionState[k]==='error'||sectionState[k]==='stale'}).length;
-    if(loading)return '부분 갱신 중 · 정상 '+ok+'/4 · '+new Date().toLocaleTimeString();
-    if(failed)return '부분 지연 '+failed+'개 · 정상 '+ok+'/4 · 마지막 정상값 보존 · 60초 자동';
-    return '정상 · '+new Date().toLocaleString()+' · 60초 자동';
-  }
-  function updateHeader(){setText('updated',statusLine())}
-  function request(key,url,ms,token){
-    sectionState[key]='loading';delete sectionError[key];updateHeader();
-    var c=new AbortController(),t=setTimeout(function(){c.abort()},ms||5000);
-    return window.fetch(url+(url.indexOf('?')>=0?'&':'?')+'t='+Date.now(),{signal:c.signal,cache:'no-store'})
-      .then(function(r){clearTimeout(t);if(r.status===401){location.href='/login';throw new Error('LOGIN')}if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
-      .then(function(data){if(token!==generation)return null;sectionState[key]='ok';cachePut(key,data);updateHeader();return data})
-      .catch(function(e){clearTimeout(t);if(token!==generation)return null;sectionState[key]='error';sectionError[key]=(e&&e.name==='AbortError')?'응답시간 초과':String(e&&e.message||e);updateHeader();return null});
-  }
-  function renderFlow(x){
-    if(!x)return;
-    flowData=x;clearStale('decisionHero');clearStale('leaders');clearStale('top3');clearStale('sectors');
-    try{setHtml('decisionHero',typeof mainDecision==='function'?mainDecision(x):'<div class="heroLabel">지금 해야 할 일</div><div class="heroAction warn">관찰</div><div class="heroReason">시장 데이터 수신</div>')}catch(e){}
-    try{setHtml('leaders',typeof leaderCards==='function'?leaderCards(x):'<div class="empty">대표 자산 데이터 수신</div>')}catch(e){}
-    try{setHtml('top3',typeof top3Cards==='function'?top3Cards(x.cryptoTop||[]):'<div class="empty">TOP3 데이터 수신</div>')}catch(e){}
-    try{var entries=(x.cryptoTop||[]).filter(function(r){return String(r.status||'').toUpperCase()==='ENTRY'}).length;setText('cryptoState',entries?'실전 ENTRY '+entries:'현재 실전 ENTRY 없음')}catch(e){}
-    try{setHtml('sectors',typeof sectorCards==='function'?sectorCards(x,stockData):'<div class="empty">섹터 데이터 수신</div>')}catch(e){}
-    try{setHtml('diag',typeof diagnostics==='function'?diagnostics(x):'')}catch(e){}
-    applyProviderWarning();
-  }
-  function renderStocks(q){stockData=q&&Array.isArray(q.items)?q:{items:[]};clearStale('sectors');if(flowData){try{setHtml('sectors',sectorCards(flowData,stockData))}catch(e){}}}
-  function renderEtf(e){clearStale('retirementEtf');try{setHtml('retirementEtf',typeof etfCards==='function'?etfCards(e):'<div class="empty">ETF 데이터 수신</div>')}catch(err){setHtml('retirementEtf','<div class="empty">ETF 표시 오류</div>')}}
-  function renderPortfolio(p){clearStale('portfolio');try{if(typeof portfolioHtml==='function')setHtml('portfolio',portfolioHtml(p));else if(typeof portfolioRows==='function')setHtml('portfolio',portfolioRows(p));else setHtml('portfolio','<div class="empty">보유자산 데이터 수신</div>')}catch(e){setHtml('portfolio','<div class="empty">보유자산 표시 오류</div>')}}
   function providerMap(){var out={};((providerData&&providerData.items)||[]).forEach(function(x){out[String(x.provider||'')]=x});return out}
   function applyProviderWarning(){
     if(!providerData)return;
@@ -87,44 +46,35 @@ const SCRIPT=`<style id="gn-partial-loading-style-v1">
       pill.textContent=base+' · 온체인 제한'+(credit?'(Nansen 크레딧 0)':'');
       pill.classList.add('gnProviderWarn');
     }
-    var d=byId('diag');
-    if(d){var old=d.querySelector('[data-gn-provider-warning="1"]');if(old)old.remove();if(nBad||entryBlocked){var row=document.createElement('div');row.setAttribute('data-gn-provider-warning','1');row.className=credit?'gnProviderBad':'gnProviderWarn';row.textContent=credit?'온체인: Nansen 크레딧 부족 · 유료 재호출 금지 · 다른 데이터는 계속 표시 · 신규 ENTRY만 제한':'온체인 검증 제한 · 다른 섹션은 정상 표시';d.appendChild(row)}}
   }
-  function restore(key,renderer,ids,msg){var c=cacheGet(key,24*60*60*1000);if(!c)return false;try{renderer(c.data);sectionState[key]='stale';(ids||[]).forEach(function(id){markStale(id,c.ts,msg)});updateHeader();return true}catch(e){return false}}
-  function failFlow(msg){
-    if(restore('flow',renderFlow,['decisionHero','leaders','top3','sectors'],'마지막 정상 시장값 표시 · 신규 진입 판정 보류')){setText('cryptoState',(byId('cryptoState')?byId('cryptoState').textContent:'검증 지연').replace(/ · 데이터 지연.*$/,'')+' · 데이터 지연');return}
-    setHtml('decisionHero','<div class="heroLabel">지금 해야 할 일</div><div class="heroAction warn">시장 데이터 지연</div><div class="heroReason">다른 섹션은 계속 갱신 · 신규 진입 판정만 보류</div>');
-    setHtml('leaders','<div class="empty">대표 선수 데이터 지연 · 자동 재조회</div>');
-    setHtml('top3','<div class="empty">TOP3 원본 데이터 지연 · 진입 판정 보류</div>');
-    setText('cryptoState','검증 지연');
-    setHtml('sectors','<div class="empty">섹터 원본 데이터 지연</div>');
-    setHtml('diag','<div class="gnSectionError">flow-map · '+esc(msg||'조회 지연')+'</div>');
+  function loadProviders(){
+    return fetch('/api/provider-status?t='+Date.now(),{cache:'no-store'})
+      .then(function(r){if(r.status===401){location.href='/login';throw Error('LOGIN')}if(!r.ok)throw Error('HTTP '+r.status);return r.json()})
+      .then(function(d){providerData=d;applyProviderWarning();return d})
+      .catch(function(){return null});
   }
   function loadPartial(){
-    var token=++generation;
-    ['flow','stocks','etf','portfolio','providers'].forEach(function(k){sectionState[k]='idle';delete sectionError[k]});updateHeader();
-    setTimeout(function(){if(token!==generation)return;if(sectionState.flow==='loading'&&!flowData&& !cacheGet('flow',24*60*60*1000)){setHtml('leaders','<div class="empty gnSectionWait">대표 선수 먼저 불러오는 중 · 다른 섹션과 독립 갱신</div>')}},900);
-    request('flow','/api/flow-map',5000,token).then(function(x){if(token!==generation)return;if(x)renderFlow(x);else failFlow(sectionError.flow)});
-    request('stocks','/api/stock-quotes',4500,token).then(function(q){if(token!==generation)return;if(q)renderStocks(q);else if(!restore('stocks',renderStocks,['sectors'],'마지막 정상 주식값 표시')&&flowData){try{setHtml('sectors',sectorCards(flowData,{items:[]}))}catch(e){}}});
-    request('etf','/api/etf/latest',4500,token).then(function(e){if(token!==generation)return;if(e)renderEtf(e);else if(!restore('etf',renderEtf,['retirementEtf'],'마지막 정상 ETF값 표시'))setHtml('retirementEtf','<div class="empty">ETF 시세 지연 · 자동 재조회</div>')});
-    request('portfolio','/api/portfolio',4500,token).then(function(p){if(token!==generation)return;if(p)renderPortfolio(p);else if(!restore('portfolio',renderPortfolio,['portfolio'],'마지막 정상 보유자산값 표시'))setHtml('portfolio','<div class="empty">보유자산 조회 지연 · 자동 재조회</div>')});
-    request('providers','/api/provider-status',3500,token).then(function(p){if(token!==generation)return;if(p){providerData=p;applyProviderWarning()}else{var c=cacheGet('providers',6*60*60*1000);if(c){providerData=c.data;sectionState.providers='stale';applyProviderWarning()}}});
+    var jobs=[];
+    // Authoritative renderer is the only owner of dashboard content.
+    if(typeof window.loadGN==='function')jobs.push(Promise.resolve(window.loadGN()));
+    else if(typeof window.refreshGN==='function')jobs.push(Promise.resolve(window.refreshGN()));
+    jobs.push(loadProviders());
+    return Promise.allSettled(jobs);
   }
-  function bindRefresh(){var header=document.querySelector('header');if(!header)return;var old=byId('gnManualRefresh')||Array.from(header.querySelectorAll('button')).find(function(x){return /새로고침|갱신/.test(x.textContent||'')});if(!old)return;var b=old.cloneNode(true);b.id='gnManualRefresh';b.type='button';b.textContent='새로고침';b.dataset.gnBound='1';old.parentNode.replaceChild(b,old);b.addEventListener('click',function(ev){ev.preventDefault();ev.stopImmediatePropagation();loadPartial()},{passive:false});b.addEventListener('touchend',function(ev){ev.preventDefault();ev.stopImmediatePropagation();loadPartial()},{passive:false})}
-  window.loadAll=loadPartial;window.gnPartialLoad=loadPartial;
-  bindRefresh();setTimeout(bindRefresh,500);setTimeout(bindRefresh,1800);
-  loadPartial();setInterval(loadPartial,60000);setInterval(applyProviderWarning,15000);
+  window.loadAll=loadPartial;
+  window.gnPartialLoad=loadPartial;
+  setTimeout(loadPartial,700);
+  setInterval(loadProviders,60000);
+  setInterval(applyProviderWarning,15000);
 })();</script>`;
 
-function stripLegacyGlobalLoaders(html){
-  if(typeof html!=="string")return html;
-  html=html.replace(/loadAll\(\);setInterval\(loadAll,60000\);<\/script>/,'</script>');
-  html=html.replace(/<script id="gn-dashboard-resilience-v1">[\s\S]*?<\/script>/,'');
-  html=html.replace(/<script id="gn-hard-rescue-v2">[\s\S]*?<\/script>/,'');
-  return html;
+function isDashboardHtml(html){return typeof html==="string"&&html.includes('id="leaders"')&&html.includes('id="top3"')&&html.includes('id="retirementEtf"')&&html.includes('id="portfolio"')}
+function patchHtml(html){if(!isDashboardHtml(html)||html.includes("gn-partial-loading-v1"))return html;return html.replace("</body>",SCRIPT+"</body>")}
+function wrappedExpress(...args){
+  const app=previousExpress(...args);
+  app.get("/api/provider-status",providerStatus);
+  app.use((req,res,next)=>{const send=res.send.bind(res);res.send=function(body){return send(patchHtml(body))};next()});
+  return app;
 }
-function isDashboardHtml(html){return typeof html==="string"&&html.includes('id="decisionHero"')&&html.includes('id="retirementEtf"')&&html.includes('id="portfolio"')}
-function patchHtml(html){if(!isDashboardHtml(html)||html.includes("gn-partial-loading-v1"))return html;html=stripLegacyGlobalLoaders(html);return html.replace("</body>",SCRIPT+"</body>")}
-function wrappedExpress(...args){const app=previousExpress(...args);app.get("/api/provider-status",providerStatus);app.use((req,res,next)=>{const send=res.send.bind(res);res.send=function(body){return send(patchHtml(body))};next()});return app}
 Object.assign(wrappedExpress,previousExpress);
 require.cache[expressPath].exports=wrappedExpress;
