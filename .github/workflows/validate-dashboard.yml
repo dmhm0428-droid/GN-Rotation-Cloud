@@ -23,7 +23,7 @@ jobs:
       - run: node --check src/dashboard-resilience-patch.js
       - run: node --check src/dashboard-hard-rescue.js
       - run: node --check src/final-dashboard-patch.js
-      - run: node --check src/dashboard-partial-loading-v1.js
+      - run: node --check src/dashboard-live-summary-patch.js
       - run: node --test test/dashboard-resilience.test.js test/dashboard-injected-script.test.js
       - name: Verify Render build configuration
         run: |
@@ -50,7 +50,8 @@ jobs:
           done
           if [ "$ok" != "1" ]; then echo 'GN UI health did not become ready'; cat /tmp/gn-server.log; exit 1; fi
           grep -q '"ok":true' /tmp/ui-health.json || exit 1
-          grep -q 'GN_UI_CANONICAL_20260903_V1' /tmp/ui-health.json || exit 1
+          grep -q 'GN_UI_CANONICAL_20260905_V2' /tmp/ui-health.json || exit 1
+          grep -q '"partialLoaderDisabled":true' /tmp/ui-health.json || exit 1
           curl -fsS --max-time 3 http://127.0.0.1:3100/login > /tmp/login.html || { cat /tmp/gn-server.log; exit 1; }
           grep -q 'GN PIVOT' /tmp/login.html || exit 1
           grep -q '로그인' /tmp/login.html || exit 1
@@ -64,7 +65,7 @@ jobs:
           grep -q 'id="top3"' /tmp/dashboard.html || { echo 'top3 missing'; exit 1; }
           grep -q 'id="retirementEtf"' /tmp/dashboard.html || { echo 'retirementEtf missing'; exit 1; }
           grep -q 'id="portfolio"' /tmp/dashboard.html || { echo 'portfolio missing'; exit 1; }
-          grep -q 'gn-partial-loading-v1' /tmp/dashboard.html || { echo 'partial loader missing'; exit 1; }
+          if grep -q 'gn-partial-loading-v1' /tmp/dashboard.html; then echo 'broken partial loader unexpectedly active'; exit 1; fi
           grep -q 'gn-leading-top3-v2-ui' /tmp/dashboard.html || { echo 'single TOP3 renderer missing'; exit 1; }
 
   legacy-regression-report:
@@ -79,8 +80,6 @@ jobs:
       - run: npm test
 
   live-render-diagnostic:
-    # Diagnostic only. It must not block a Render service configured as "After CI Checks Pass",
-    # otherwise deployment and verification deadlock each other.
     needs: [dashboard-safety]
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -95,24 +94,17 @@ jobs:
           set -euo pipefail
           base="${RENDER_PUBLIC_URL%/}"
           if [ -z "$base" ]; then
-            service="$(awk '/^[[:space:]]+- type: web/{web=1;next} web&&/^[[:space:]]+name:/{print $2;exit}' render.yaml)"
-            test -n "$service"
-            base="https://${service}.onrender.com"
-            echo "RENDER_PUBLIC_URL missing; using deterministic Blueprint service URL $base"
+            base="https://gn-rotation-cloud-8b0z.onrender.com"
+            echo "RENDER_PUBLIC_URL missing; using verified live service URL $base"
           fi
           ui_code="$(curl -L -sS -o /tmp/ui-health -w '%{http_code}' --connect-timeout 5 --max-time 12 "$base/health/ui" || true)"
           health_code="$(curl -L -sS -o /tmp/health -w '%{http_code}' --connect-timeout 5 --max-time 12 "$base/health" || true)"
           login_code="$(curl -L -sS -o /tmp/login -w '%{http_code}' --connect-timeout 5 --max-time 12 "$base/login" || true)"
           echo "LIVE_CODES ui=$ui_code health=$health_code login=$login_code"
-          if [ "$ui_code" = "200" ] && grep -q '"ok":true' /tmp/ui-health && grep -q 'GN_UI_CANONICAL_20260903_V1' /tmp/ui-health; then
+          if [ "$ui_code" = "200" ] && grep -q '"ok":true' /tmp/ui-health && grep -q 'GN_UI_CANONICAL_20260905_V2' /tmp/ui-health; then
             grep -q 'GN PIVOT' /tmp/login
             echo "LIVE_RENDER_UI_OK=$base"
             exit 0
           fi
-          if [ "$health_code" = "200" ] || [ "$login_code" = "200" ]; then
-            echo "::warning::Render service is reachable but still serving an older dashboard revision; CI is allowed to pass so checksPass auto-deploy can proceed."
-          else
-            echo "::warning::Render Blueprint URL is not reachable yet; CI is allowed to pass so deployment is not blocked."
-          fi
-          echo "LIVE_RENDER_UI_STALE=$base"
+          echo "::warning::Render is reachable but not yet serving the new canonical revision."
           exit 1
