@@ -45,6 +45,7 @@ const preloads=[
   "dashboard-rotation-v1.js",
   "dashboard-authoritative-v1.js",
   "dashboard-live-summary-patch.js",
+  "dashboard-etf-api-v1.js",
   "dashboard-resilience-patch.js",
   "dashboard-runtime-hotfix.js",
   "dashboard-hard-rescue.js",
