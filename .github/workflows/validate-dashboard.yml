@@ -22,7 +22,7 @@ jobs:
       - run: node --check src/dashboard-precursor-top3-v1.js
       - run: node --check src/dashboard-resilience-patch.js
       - run: node --check src/dashboard-hard-rescue.js
-      - run: node --check src/final-dashboard-patch.js
+      - run: node --check src/dashboard-authoritative-v1.js
       - run: node --check src/dashboard-live-summary-patch.js
       - run: node --test test/dashboard-resilience.test.js test/dashboard-injected-script.test.js
       - name: Verify Render build configuration
@@ -50,7 +50,8 @@ jobs:
           done
           if [ "$ok" != "1" ]; then echo 'GN UI health did not become ready'; cat /tmp/gn-server.log; exit 1; fi
           grep -q '"ok":true' /tmp/ui-health.json || exit 1
-          grep -q 'GN_UI_CANONICAL_20260905_V2' /tmp/ui-health.json || exit 1
+          grep -q 'GN_UI_CANONICAL_20260905_V3' /tmp/ui-health.json || exit 1
+          grep -q '"canonicalDashboardOwner":"dashboard-authoritative-v1"' /tmp/ui-health.json || exit 1
           grep -q '"partialLoaderDisabled":true' /tmp/ui-health.json || exit 1
           curl -fsS --max-time 3 http://127.0.0.1:3100/login > /tmp/login.html || { cat /tmp/gn-server.log; exit 1; }
           grep -q 'GN PIVOT' /tmp/login.html || exit 1
@@ -60,11 +61,13 @@ jobs:
             -o /tmp/post-login -D /tmp/post-login-headers \
             http://127.0.0.1:3100/login || { cat /tmp/gn-server.log; exit 1; }
           curl -fsS -c /tmp/cookies -b /tmp/cookies http://127.0.0.1:3100/ > /tmp/dashboard.html || { cat /tmp/gn-server.log; exit 1; }
-          grep -q 'id="decisionHero"' /tmp/dashboard.html || { echo 'decisionHero missing'; exit 1; }
+          grep -q 'id="decision"' /tmp/dashboard.html || { echo 'decision missing'; exit 1; }
           grep -q 'id="leaders"' /tmp/dashboard.html || { echo 'leaders missing'; exit 1; }
           grep -q 'id="top3"' /tmp/dashboard.html || { echo 'top3 missing'; exit 1; }
           grep -q 'id="retirementEtf"' /tmp/dashboard.html || { echo 'retirementEtf missing'; exit 1; }
           grep -q 'id="portfolio"' /tmp/dashboard.html || { echo 'portfolio missing'; exit 1; }
+          grep -q 'gn-authoritative-v4' /tmp/dashboard.html || { echo 'authoritative dashboard renderer missing'; exit 1; }
+          if grep -q 'gn-final-style-v3' /tmp/dashboard.html; then echo 'conflicting final full-body renderer unexpectedly active'; exit 1; fi
           if grep -q 'gn-partial-loading-v1' /tmp/dashboard.html; then echo 'broken partial loader unexpectedly active'; exit 1; fi
           grep -q 'gn-leading-top3-v2-ui' /tmp/dashboard.html || { echo 'single TOP3 renderer missing'; exit 1; }
 
@@ -101,7 +104,7 @@ jobs:
           health_code="$(curl -L -sS -o /tmp/health -w '%{http_code}' --connect-timeout 5 --max-time 12 "$base/health" || true)"
           login_code="$(curl -L -sS -o /tmp/login -w '%{http_code}' --connect-timeout 5 --max-time 12 "$base/login" || true)"
           echo "LIVE_CODES ui=$ui_code health=$health_code login=$login_code"
-          if [ "$ui_code" = "200" ] && grep -q '"ok":true' /tmp/ui-health && grep -q 'GN_UI_CANONICAL_20260905_V2' /tmp/ui-health; then
+          if [ "$ui_code" = "200" ] && grep -q '"ok":true' /tmp/ui-health && grep -q 'GN_UI_CANONICAL_20260905_V3' /tmp/ui-health; then
             grep -q 'GN PIVOT' /tmp/login
             echo "LIVE_RENDER_UI_OK=$base"
             exit 0
