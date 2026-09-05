@@ -32,12 +32,11 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
-// Operational/data warnings are rendered last so they stay amber and cannot be confused with
-// genuine market/trade-risk red signals. The broken partial loader is intentionally disabled:
-// it overwrites valid live data with fallback loading placeholders on the live dashboard.
+// Keep the canonical dashboard stack, but do not load dashboard-operational-status-color-v1.js.
+// Its latest rescue script matched the login page as well as the dashboard and could repeatedly
+// redirect/reload after API 401 responses. UI health remains handled by dashboard-ui-health-v1.
 // Crypto TOP3 UI has ONE owner only: dashboard-leading-top3-v2.
 const preloads=[
-  "dashboard-operational-status-color-v1.js",
   "dashboard-ui-health-v1.js",
   "dashboard-cleanup-watchlist-v1.js",
   "dashboard-leading-top3-v2.js",
