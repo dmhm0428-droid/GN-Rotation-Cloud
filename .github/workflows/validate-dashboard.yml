@@ -19,6 +19,7 @@ jobs:
       - run: node --check src/dashboard-ui-health-v1.js
       - run: node --check src/dashboard-big-picture-v1.js
       - run: node --check src/dashboard-rotation-v1.js
+      - run: node --check src/dashboard-ai-status-v1.js
       - run: node --check src/dashboard-etf-api-v1.js
       - run: node --check src/precursor-dashboard.js
       - run: node --check src/dashboard-precursor-top3-v1.js
@@ -69,6 +70,7 @@ jobs:
           grep -q 'id="retirementEtf"' /tmp/dashboard.html || { echo 'retirementEtf missing'; exit 1; }
           grep -q 'id="portfolio"' /tmp/dashboard.html || { echo 'portfolio missing'; exit 1; }
           grep -q 'gn-authoritative-v4' /tmp/dashboard.html || { echo 'authoritative dashboard renderer missing'; exit 1; }
+          grep -q 'gn-ai-status-v1' /tmp/dashboard.html || { echo 'fresh AI status overlay missing'; exit 1; }
           if grep -q 'gn-final-style-v3' /tmp/dashboard.html; then echo 'conflicting final full-body renderer unexpectedly active'; exit 1; fi
           if grep -q 'gn-partial-loading-v1' /tmp/dashboard.html; then echo 'broken partial loader unexpectedly active'; exit 1; fi
           grep -q 'gn-leading-top3-v2-ui' /tmp/dashboard.html || { echo 'single TOP3 renderer missing'; exit 1; }
