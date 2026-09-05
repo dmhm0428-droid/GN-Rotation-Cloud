@@ -18,6 +18,8 @@ jobs:
       - run: node --check src/start.js
       - run: node --check src/dashboard-ui-health-v1.js
       - run: node --check src/dashboard-big-picture-v1.js
+      - run: node --check src/dashboard-rotation-v1.js
+      - run: node --check src/dashboard-etf-api-v1.js
       - run: node --check src/precursor-dashboard.js
       - run: node --check src/dashboard-precursor-top3-v1.js
       - run: node --check src/dashboard-resilience-patch.js
