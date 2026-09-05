@@ -35,6 +35,8 @@ function runAssistant(){
 // Keep ONE authoritative full-dashboard renderer. Legacy/final full-body replacement layers
 // are intentionally excluded because they can overwrite a working dashboard with placeholders.
 // Crypto TOP3 UI has ONE owner only: dashboard-leading-top3-v2.
+// The title compatibility shim runs first on the outgoing response so the authoritative renderer
+// can recognize the current scalp shell title without touching server.js.
 const preloads=[
   "dashboard-ui-health-v1.js",
   "dashboard-cleanup-watchlist-v1.js",
@@ -47,7 +49,8 @@ const preloads=[
   "dashboard-live-summary-patch.js",
   "dashboard-resilience-patch.js",
   "dashboard-runtime-hotfix.js",
-  "dashboard-hard-rescue.js"
+  "dashboard-hard-rescue.js",
+  "dashboard-title-compat-v1.js"
 ].map(x=>path.resolve(__dirname,x));
 const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,...preloads.map(x=>`--require=${x}`)].filter(Boolean).join(" ")};
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
