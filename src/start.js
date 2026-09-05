@@ -32,9 +32,8 @@ function runAssistant(){
 }
 
 // Response post-processing order is reverse preload order.
-// Keep the canonical dashboard stack, but do not load dashboard-operational-status-color-v1.js.
-// Its latest rescue script matched the login page as well as the dashboard and could repeatedly
-// redirect/reload after API 401 responses. UI health remains handled by dashboard-ui-health-v1.
+// Keep ONE authoritative full-dashboard renderer. Legacy/final full-body replacement layers
+// are intentionally excluded because they can overwrite a working dashboard with placeholders.
 // Crypto TOP3 UI has ONE owner only: dashboard-leading-top3-v2.
 const preloads=[
   "dashboard-ui-health-v1.js",
@@ -48,9 +47,7 @@ const preloads=[
   "dashboard-live-summary-patch.js",
   "dashboard-resilience-patch.js",
   "dashboard-runtime-hotfix.js",
-  "dashboard-hard-rescue.js",
-  "final-dashboard-patch.js",
-  "dashboard-activation-hotfix.js"
+  "dashboard-hard-rescue.js"
 ].map(x=>path.resolve(__dirname,x));
 const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,...preloads.map(x=>`--require=${x}`)].filter(Boolean).join(" ")};
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
