@@ -11,10 +11,14 @@ const previousExpress=require("express");
 const REQUIRED=[
   "dashboard-leading-top3-v2.js",
   "dashboard-authoritative-v1.js",
-  "dashboard-live-summary-patch.js",
-  "final-dashboard-patch.js"
+  "dashboard-live-summary-patch.js"
 ];
-const REVISION="GN_UI_CANONICAL_20260905_V2";
+const FORBIDDEN=[
+  "dashboard-partial-loading-v1.js",
+  "final-dashboard-patch.js",
+  "dashboard-activation-hotfix.js"
+];
+const REVISION="GN_UI_CANONICAL_20260905_V3";
 
 function uiHealth(req,res){
   const opts=String(process.env.NODE_OPTIONS||"");
@@ -25,9 +29,11 @@ function uiHealth(req,res){
       file:fs.existsSync(path.resolve(__dirname,name))
     };
   }
-  const ok=Object.values(checks).every(x=>x.preloaded&&x.file);
+  const forbidden={};
+  for(const name of FORBIDDEN)forbidden[name]={preloaded:opts.includes(name)};
+  const ok=Object.values(checks).every(x=>x.preloaded&&x.file)&&Object.values(forbidden).every(x=>!x.preloaded);
   res.set("Cache-Control","no-store");
-  return res.status(ok?200:503).json({ok,revision:REVISION,canonicalTop3Owner:"dashboard-leading-top3-v2",partialLoaderDisabled:true,checks,time:new Date().toISOString()});
+  return res.status(ok?200:503).json({ok,revision:REVISION,canonicalTop3Owner:"dashboard-leading-top3-v2",canonicalDashboardOwner:"dashboard-authoritative-v1",partialLoaderDisabled:true,checks,forbidden,time:new Date().toISOString()});
 }
 
 function wrappedExpress(...args){
