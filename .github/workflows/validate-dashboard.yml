@@ -65,11 +65,11 @@ jobs:
             http://127.0.0.1:3100/login || { cat /tmp/gn-server.log; exit 1; }
           curl -fsS -c /tmp/cookies -b /tmp/cookies http://127.0.0.1:3100/ > /tmp/dashboard.html || { cat /tmp/gn-server.log; exit 1; }
           grep -q 'id="decision"' /tmp/dashboard.html || { echo 'decision missing'; exit 1; }
-          grep -q 'id="leaders"' /tmp/dashboard.html || { echo 'leaders missing'; exit 1; }
+          grep -q 'id="assetFlow"' /tmp/dashboard.html || { echo 'assetFlow missing'; exit 1; }
           grep -q 'id="top3"' /tmp/dashboard.html || { echo 'top3 missing'; exit 1; }
           grep -q 'id="retirementEtf"' /tmp/dashboard.html || { echo 'retirementEtf missing'; exit 1; }
           grep -q 'id="portfolio"' /tmp/dashboard.html || { echo 'portfolio missing'; exit 1; }
-          grep -q 'gn-authoritative-v4' /tmp/dashboard.html || { echo 'authoritative dashboard renderer missing'; exit 1; }
+          grep -q 'gn-authoritative-v5' /tmp/dashboard.html || { echo 'authoritative dashboard renderer missing'; exit 1; }
           grep -q 'gn-ai-status-v1' /tmp/dashboard.html || { echo 'fresh AI status overlay missing'; exit 1; }
           if grep -q 'gn-final-style-v3' /tmp/dashboard.html; then echo 'conflicting final full-body renderer unexpectedly active'; exit 1; fi
           if grep -q 'gn-partial-loading-v1' /tmp/dashboard.html; then echo 'broken partial loader unexpectedly active'; exit 1; fi
