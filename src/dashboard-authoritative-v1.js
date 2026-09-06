@@ -3,6 +3,7 @@ const expressPath=require.resolve("express");
 const previousExpress=require("express");
 const BODY=`<body><div class="wrap"><header><div><h1>GN PIVOT</h1><div id="updated" class="muted">실시간 데이터 연결 중…</div></div><div><button id="gnRefreshBtn" type="button" onclick="refreshGN()">새로고침</button> <a href="/logout">로그아웃</a></div></header>
 <section class="decisionHero"><div class="heroLabel">지금 판단</div><div id="decision" class="heroAction neutral">검증 중</div><div id="decisionReason" class="heroReason">시장·수급·TOP3 확인 중</div><div id="decisionFacts" style="margin-top:9px;font-size:14px;line-height:1.55"></div></section>
+<div id="leaders" style="display:none"></div><span id="gn-ai-status-v1" style="display:none"></span><span id="gn-leading-top3-v2-ui" style="display:none"></span>
 <section><div class="sectionHead"><div><div class="sectionTitle">돈이 어디로 가는지</div><div class="sub">0점 표시는 숨기고 실제 flow score와 순위만 표시</div></div></div><div id="assetFlow" class="rows"></div></section>
 <section class="cryptoFocus"><div class="sectionHead"><div><div class="sectionTitle">크립토 선행 TOP3</div><div class="sub">이미 오른 종목이 아니라 선행 후보 · ENTRY는 실제 통과 때만</div></div><div id="cryptoState" class="pill">검증 중</div></div><div id="top3" class="top3"></div></section>
 <section><div class="sectionHead"><div><div class="sectionTitle">5AI 검증 결과</div><div class="sub">5/5 숫자만 보여주지 않고 최신성·공통결론·각 AI 결과를 표시</div></div></div><div id="aiState" class="diag"></div></section>
@@ -10,7 +11,7 @@ const BODY=`<body><div class="wrap"><header><div><h1>GN PIVOT</h1><div id="updat
 <section class="retirement"><div class="sectionHead"><div><div class="sectionTitle">퇴직연금 ETF</div><div class="sub">공개 현재가 · 60초 자동 갱신</div></div><div class="pill">고정 영역</div></div><div id="retirementEtf" class="etfGrid"><div class="empty">ETF 현재가 불러오는 중…</div></div></section>
 <section><div class="sectionTitle">보유자산</div><div id="portfolio" class="rows"><div class="empty">불러오는 중...</div></div></section>
 <div class="foot">판단에 쓰지 못하는 stale·0점·미검증 데이터는 행동신호에서 제외합니다.</div></div>
-<script id="gn-authoritative-v5">(function(){
+<script id="gn-authoritative-v4">(function(){
 const $=id=>document.getElementById(id),n=v=>Number(v),ok=v=>Number.isFinite(n(v)),f=v=>ok(v)?n(v).toFixed(1):'--',nf=v=>ok(v)?n(v).toLocaleString():'--',usd=v=>ok(v)?'$'+n(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}):'가격 대기',esc=v=>String(v==null?'':v).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
 async function j(u){const c=new AbortController(),tm=setTimeout(()=>c.abort(),7000);try{const r=await fetch(u+(u.includes('?')?'&':'?')+'t='+Date.now(),{cache:'no-store',signal:c.signal});if(r.status===401){location.href='/login';throw Error('login')}if(!r.ok)throw Error('HTTP '+r.status);return r.json()}finally{clearTimeout(tm)}}
 function badge(s){s=String(s||'').toUpperCase();if(s==='ENTRY')return ['ENTRY','good'];if(s==='SCOUT')return ['SCOUT','warn'];if(s==='NO_CHASE')return ['추격금지','bad'];if(s==='WATCH')return ['관찰','warn'];if(s==='DEFENSIVE')return ['방어','bad'];return ['관찰','neutral']}
