@@ -36,6 +36,16 @@ test("cross-venue disagreement is WATCH, confirmed risk is blocked",()=>{
   assert.equal(blocked.status,"NO_CHASE");
 });
 
+test("Upbit post-pump decay blocks KRW entry even without Binance confirmation",()=>{
+  const decay={available:true,source:"upbit",blockTop3:true,postPumpDecay:true,extreme:false,reasons:["post-pump decay"]};
+  const clear={available:true,source:"binance",blockTop3:false,postPumpDecay:false,extreme:false,reasons:[]};
+  const out=combineFourHourChecks([decay,clear]);
+  assert.equal(out.blockTop3,true);
+  assert.equal(out.entryBlocked,true);
+  assert.equal(out.status,"NO_CHASE");
+  assert.equal(out.postPumpVenueCount,1);
+});
+
 test("missing 4H data never preserves ENTRY permission",()=>{
   const out=combineFourHourChecks([{available:false},{available:false}]);
   assert.equal(out.available,false);
