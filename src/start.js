@@ -38,6 +38,7 @@ function runAssistant(){
 const preloads=[
   "dashboard-ui-health-v1.js",
   "dashboard-cleanup-watchlist-v1.js",
+  "dashboard-4h-chase-guard.js",
   "dashboard-leading-top3-v2.js",
   "dashboard-big-picture-v1.js",
   "dashboard-metals-live-v1.js",
