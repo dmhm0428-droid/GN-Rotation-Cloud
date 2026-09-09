@@ -72,7 +72,7 @@ jobs:
           grep -q 'id="top3"' /tmp/dashboard.html || { echo 'top3 missing'; exit 1; }
           [ "$(grep -o 'id="top3"' /tmp/dashboard.html | wc -l)" -eq 1 ] || { echo 'duplicate TOP3 renderer shell'; exit 1; }
           grep -q 'Pre-Pump TOP3' /tmp/dashboard.html || { echo 'canonical TOP3 semantics missing'; exit 1; }
-          grep -q 'id="gn-authoritative-v7"' /tmp/dashboard.html || { echo 'authoritative numeric renderer missing'; exit 1; }
+          grep -q 'id="gn-authoritative-v8"' /tmp/dashboard.html || { echo 'authoritative numeric renderer missing'; exit 1; }
           if grep -q 'gn-final-style-v3' /tmp/dashboard.html; then echo 'conflicting final full-body renderer unexpectedly active'; exit 1; fi
           if grep -q 'gn-partial-loading-v1' /tmp/dashboard.html; then echo 'broken partial loader unexpectedly active'; exit 1; fi
 
