@@ -64,16 +64,15 @@ jobs:
             -o /tmp/post-login -D /tmp/post-login-headers \
             http://127.0.0.1:3100/login || { cat /tmp/gn-server.log; exit 1; }
           curl -fsS -c /tmp/cookies -b /tmp/cookies http://127.0.0.1:3100/ > /tmp/dashboard.html || { cat /tmp/gn-server.log; exit 1; }
-          grep -q 'id="decision"' /tmp/dashboard.html || { echo 'decision missing'; exit 1; }
-          grep -q 'id="assetFlow"' /tmp/dashboard.html || { echo 'assetFlow missing'; exit 1; }
+          grep -q 'id="hero"' /tmp/dashboard.html || { echo 'hero missing'; exit 1; }
+          grep -q 'id="actions"' /tmp/dashboard.html || { echo 'actions missing'; exit 1; }
+          grep -q 'id="assets"' /tmp/dashboard.html || { echo 'assets missing'; exit 1; }
+          grep -q 'id="footprints"' /tmp/dashboard.html || { echo 'footprints missing'; exit 1; }
           grep -q 'id="top3"' /tmp/dashboard.html || { echo 'top3 missing'; exit 1; }
-          grep -q 'id="retirementEtf"' /tmp/dashboard.html || { echo 'retirementEtf missing'; exit 1; }
-          grep -q 'id="portfolio"' /tmp/dashboard.html || { echo 'portfolio missing'; exit 1; }
-          grep -q 'gn-authoritative-v5' /tmp/dashboard.html || { echo 'authoritative dashboard renderer missing'; exit 1; }
-          grep -q 'gn-ai-status-v1' /tmp/dashboard.html || { echo 'fresh AI status overlay missing'; exit 1; }
+          [ "$(grep -o 'id="top3"' /tmp/dashboard.html | wc -l)" -eq 1 ] || { echo 'duplicate TOP3 renderer shell'; exit 1; }
+          grep -q '원본 ENTRY/관리 상태' /tmp/dashboard.html || { echo 'canonical TOP3 semantics missing'; exit 1; }
           if grep -q 'gn-final-style-v3' /tmp/dashboard.html; then echo 'conflicting final full-body renderer unexpectedly active'; exit 1; fi
           if grep -q 'gn-partial-loading-v1' /tmp/dashboard.html; then echo 'broken partial loader unexpectedly active'; exit 1; fi
-          grep -q 'gn-leading-top3-v2-ui' /tmp/dashboard.html || { echo 'single TOP3 renderer missing'; exit 1; }
 
   legacy-regression-report:
     runs-on: ubuntu-latest
