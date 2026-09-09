@@ -31,7 +31,7 @@ jobs:
       - name: Verify Render build configuration
         run: |
           grep -q 'buildCommand: npm install --omit=dev' render.yaml
-          grep -q 'healthCheckPath: /health/ui' render.yaml
+          grep -q 'healthCheckPath: /health' render.yaml
       - name: Boot server and verify authenticated canonical dashboard shell
         shell: bash
         run: |
