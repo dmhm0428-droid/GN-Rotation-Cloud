@@ -31,11 +31,10 @@ function runAssistant(){
   child.on("error",error=>{assistantRunning=false;console.error("GN investment assistant scheduler spawn error",error?.message||error);clearTimeout(assistantRetryTimer);assistantRetryTimer=setTimeout(runAssistant,60000);});
 }
 
-// Response post-processing order is reverse preload order.
-// Keep ONE authoritative full-dashboard renderer. Legacy/final full-body replacement layers
-// are intentionally excluded because they can overwrite a working dashboard with placeholders.
-// Crypto TOP3 UI has ONE owner only: dashboard-leading-top3-v2.
+// Response wrappers run in reverse preload order. Put the authoritative renderer FIRST
+// in NODE_OPTIONS so it becomes the outermost response wrapper and wins last.
 const preloads=[
+  "dashboard-authoritative-v1.js",
   "dashboard-ui-health-v1.js",
   "dashboard-cleanup-watchlist-v1.js",
   "dashboard-4h-chase-guard.js",
@@ -45,7 +44,6 @@ const preloads=[
   "dashboard-rotation-drilldown-v2.js",
   "dashboard-rotation-v1.js",
   "dashboard-ai-status-v1.js",
-  "dashboard-authoritative-v1.js",
   "dashboard-live-summary-patch.js",
   "dashboard-etf-api-v1.js",
   "dashboard-resilience-patch.js",
