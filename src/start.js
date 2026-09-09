@@ -27,7 +27,7 @@ function runAi(){
 function runAssistant(){
   if(assistantRunning)return;assistantRunning=true;
   const child=spawn(process.execPath,["src/investment-assistant-runner.js"],{env:process.env,stdio:"inherit"});
-  child.on("exit",code=>{assistantRunning=false;if(code!==0){console.error(`GN investment assistant exited with code ${code}; retrying in 60s`);clearTimeout(assistantRetryTimer);assistantRetryTimer=setTimeout(runAssistant,60000);}});
+  child.on("exit",code=>{assistantRunning=false;if(code!==0){console.error(`GN investment assistant scheduler exited with code ${code}; retrying in 60s`);clearTimeout(assistantRetryTimer);assistantRetryTimer=setTimeout(runAssistant,60000);}});
   child.on("error",error=>{assistantRunning=false;console.error("GN investment assistant scheduler spawn error",error?.message||error);clearTimeout(assistantRetryTimer);assistantRetryTimer=setTimeout(runAssistant,60000);});
 }
 
@@ -35,6 +35,7 @@ function runAssistant(){
 // then the authoritative renderer, so the post-processors receive its final HTML.
 const preloads=[
   "dashboard-us-stock-footprint-v1.js",
+  "dashboard-risk-buy-fx-v1.js",
   "dashboard-authoritative-v1.js",
   "dashboard-ui-health-v1.js",
   "dashboard-cleanup-watchlist-v1.js",
