@@ -3,7 +3,9 @@ const expressPath=require.resolve("express");
 const previousExpress=require("express");
 function patchHtml(html){
   if(typeof html!=="string")return html;
-  return html.replace("<title>GN PIVOT · 단타</title>","<title>GN PIVOT</title>");
+  return html
+    .replace("<title>GN PIVOT · 단타</title>","<title>GN PIVOT</title>")
+    .replace("<title>GN PIVOT · 투자비서</title>","<title>GN PIVOT</title>");
 }
 function wrappedExpress(...args){
   const app=previousExpress(...args);
