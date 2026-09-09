@@ -31,9 +31,10 @@ function runAssistant(){
   child.on("error",error=>{assistantRunning=false;console.error("GN investment assistant scheduler spawn error",error?.message||error);clearTimeout(assistantRetryTimer);assistantRetryTimer=setTimeout(runAssistant,60000);});
 }
 
-// Response wrappers run in reverse preload order. Put the authoritative renderer FIRST
-// in NODE_OPTIONS so it becomes the outermost response wrapper and wins last.
+// Response wrappers run in reverse preload order. Put final UI post-processors first,
+// then the authoritative renderer, so the post-processors receive its final HTML.
 const preloads=[
+  "dashboard-us-stock-footprint-v1.js",
   "dashboard-authoritative-v1.js",
   "dashboard-ui-health-v1.js",
   "dashboard-cleanup-watchlist-v1.js",
