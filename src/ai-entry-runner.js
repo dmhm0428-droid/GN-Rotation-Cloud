@@ -18,13 +18,14 @@ async function latestBatch(db,table,limit=24){
   const {data}=await db.from(table).select("*").eq("ts",head.ts).limit(limit);return data||[];
 }
 async function latestImmediateCrypto(db){
-  const {data:runs,error}=await db.from("gn_runs").select("id,started_at,status,source_status").order("started_at",{ascending:false}).limit(40);
+  const {data:runs,error}=await db.from("gn_runs").select("id,started_at,status,source_status").order("started_at",{ascending:false}).limit(80);
   if(error)return {ts:null,rows:[]};
-  const run=(runs||[]).find(r=>String(r?.source_status?.source||"")==="pre_pump_immediate_v2")||null;
+  const acceptedSources=new Set(["pre_pump_rotation_expand_v1","pre_pump_immediate_v2"]);
+  const run=(runs||[]).find(r=>acceptedSources.has(String(r?.source_status?.source||"")))||null;
   if(!run?.id)return {ts:null,rows:[]};
   const {data}=await db.from("gn_pre_pump_snapshots").select("*").eq("run_id",run.id).order("rank",{ascending:true}).limit(3);
   const rows=(data||[]).filter(row=>Number(row.rank)>=1&&Number(row.rank)<=3&&["SCOUT","ENTRY"].includes(String(row.status))&&row?.details?.mechanical_entry_ready===true&&Number(row.score)>=78);
-  return {ts:run.started_at,runId:run.id,rows};
+  return {ts:run.started_at,runId:run.id,source:String(run?.source_status?.source||""),rows};
 }
 async function alreadyAudited(db,sourceTs){
   if(!sourceTs)return false;
