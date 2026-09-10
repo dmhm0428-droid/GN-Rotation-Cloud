@@ -44,12 +44,11 @@ async function attachLifecycle(body){
   if(!body||typeof body!=="object"||Array.isArray(body))return body;
   try{
     const discarded=await loadDiscarded();
-    const active=(Array.isArray(body.cryptoRadar)?body.cryptoRadar:[]).map(r=>decorate(r));
+    // IMPORTANT: cryptoRadar is the canonical TOP3 payload produced upstream.
+    // Revalidation is display-only here; never re-rank, reclassify, or filter TOP3.
     return {...body,
-      cryptoRadar:active.filter(r=>!r.discarded),
       cryptoDiscarded:discarded,
-      cryptoTop3ValidationGate:90,
-      cryptoTop3ValidationNote:"검증신뢰점수 90/100 이상만 TOP3 유지. 이는 실제 승률 90% 보장이 아니라 백테스트로 보정할 엄격 게이트다. 발견 후에도 재검증하며 구조 훼손 시 DISCARDED로 분리한다."
+      cryptoTop3ValidationNote:"TOP3 본문은 canonical 단일 렌더러 원본을 그대로 유지한다. 사후검증·폐기 후보는 별도 패널에만 표시한다."
     };
   }catch(error){
     return {...body,cryptoTop3RevalidationError:String(error?.message||error)};
@@ -64,7 +63,7 @@ const SCRIPT=`<script id="gn-top3-revalidation-v3-ui">(function(){
  var payload=null,oldFetch=window.fetch.bind(window);
  function esc(v){return String(v==null?'':v).replace(/[&<>\"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]})}
  function nf(v){var n=Number(v);return Number.isFinite(n)?n.toLocaleString('ko-KR'):'--'}
- function render(){var top=document.getElementById('top3');if(!top||!payload)return;var old=document.getElementById('gnDiscarded');if(old)old.remove();var rows=Array.isArray(payload.cryptoDiscarded)?payload.cryptoDiscarded:[];var wrap=document.createElement('div');wrap.id='gnDiscarded';var h='<div class="gnDiscardTitle">사후검증 · 폐기 후보</div>';if(!rows.length)h+='<div class="gnDiscardMeta">현재 폐기 판정 없음 · 발견 종목은 계속 재검증 중</div>';else h+=rows.map(function(r){var rs=Array.isArray(r.discardReasons)?r.discardReasons:[];return '<div class="gnDiscardRow"><div class="gnDiscardHead"><span>'+esc(String(r.market||'').replace('KRW-',''))+'</span><span class="gnDiscardState">폐기</span></div><div class="gnDiscardMeta">검증신뢰 <span class="gnConfidence">'+nf(r.validationConfidence)+'/100</span> · '+esc(rs.join(' · ')||'구조 훼손')+'</div></div>'}).join('');h+='<div class="gnGateNote">TOP3 유지 기준: 검증신뢰 90/100 이상. 90점은 품질 게이트이며 실제 승률 90%를 의미하지 않음.</div>';wrap.innerHTML=h;top.parentNode.insertBefore(wrap,top.nextSibling)}
+ function render(){var top=document.getElementById('top3');if(!top||!payload)return;var old=document.getElementById('gnDiscarded');if(old)old.remove();var rows=Array.isArray(payload.cryptoDiscarded)?payload.cryptoDiscarded:[];var wrap=document.createElement('div');wrap.id='gnDiscarded';var h='<div class="gnDiscardTitle">사후검증 · 폐기 후보</div>';if(!rows.length)h+='<div class="gnDiscardMeta">현재 폐기 판정 없음 · 발견 종목은 계속 재검증 중</div>';else h+=rows.map(function(r){var rs=Array.isArray(r.discardReasons)?r.discardReasons:[];return '<div class="gnDiscardRow"><div class="gnDiscardHead"><span>'+esc(String(r.market||'').replace('KRW-',''))+'</span><span class="gnDiscardState">폐기</span></div><div class="gnDiscardMeta">검증신뢰 <span class="gnConfidence">'+nf(r.validationConfidence)+'/100</span> · '+esc(rs.join(' · ')||'구조 훼손')+'</div></div>'}).join('');h+='<div class="gnGateNote">TOP3 본문은 canonical 단일 렌더러 결과를 변경하지 않으며, 이 영역은 사후검증 정보만 별도 표시한다.</div>';wrap.innerHTML=h;top.parentNode.insertBefore(wrap,top.nextSibling)}
  window.fetch=async function(){var args=[].slice.call(arguments),r=await oldFetch.apply(window,args);try{var u=String(args[0]&&args[0].url?args[0].url:args[0]||'');if(u.indexOf('/api/live-summary')>=0)r.clone().json().then(function(d){payload=d;setTimeout(render,80);setTimeout(render,300)}).catch(function(){})}catch(e){}return r};
  new MutationObserver(function(){if(payload)setTimeout(render,30)}).observe(document.documentElement,{subtree:true,childList:true});
 })();</script>`;
