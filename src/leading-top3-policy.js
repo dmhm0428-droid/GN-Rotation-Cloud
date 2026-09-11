@@ -127,7 +127,7 @@ function decorate(row){
 function selectLeadingTop3(rows,{limit=3}={}){
   const decorated=(Array.isArray(rows)?rows:[]).map(decorate);
   const discarded=decorated.filter(r=>r.discarded).sort((a,b)=>(b.validationConfidence||0)-(a.validationConfidence||0));
-  const usable=decorated.filter(r=>!r.discarded&&!r.isLagging&&r.validationConfidence>=90)
+  const usable=decorated.filter(r=>!r.discarded&&!r.isLagging)
     .sort((a,b)=>b.top3LeadScore-a.top3LeadScore||(Number(a.rank)||999)-(Number(b.rank)||999));
   const top3=usable.slice(0,limit).map((r,i)=>({...r,top3Rank:i+1}));
   const selected=new Set(top3.map(r=>String(r.market||"")));
