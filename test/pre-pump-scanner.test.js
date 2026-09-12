@@ -38,7 +38,7 @@ test("calculates 5m, 15m, and recent turnover growth",()=>{
 
 test("ranks early positive candidates and excludes already-pumped coins",()=>{
   const rows=[
-    {market:"KRW-A",return5m:.02,return15m:.04,turnoverGrowth15m:2},
+    {market:"KRW-A",return5m:.02,return15m:.039,turnoverGrowth15m:2},
     {market:"KRW-B",return5m:.01,return15m:.03,turnoverGrowth15m:1},
     {market:"KRW-C",return5m:.08,return15m:.12,turnoverGrowth15m:5},
     {market:"KRW-D",return5m:-.01,return15m:.01,turnoverGrowth15m:3}
@@ -123,9 +123,8 @@ test("slightly penalizes candidates trading within half a percent of the one-hou
 test("blocks easy ENTRY after a short pump near the high",()=>{
   const penalty=highChasePenalty({return15m:.06,turnoverGrowth15m:2,highDistance1h:-.002,higherLow15m:false,structure1h:"neutral"});
   assert.deepEqual(penalty,{points:8,entryBlocked:true});
-  const [ranked]=scoreCandidates([{market:"KRW-CHASE",return5m:.03,return15m:.06,turnoverGrowth15m:2,obvDirection:1,higherLow15m:false,resistanceProximity15m:0,structure1h:"neutral",highDistance1h:-.002}]);
-  assert.equal(ranked.highChaseRisk,true);
-  assert.notEqual(ranked.state,"ENTRY");
+  const ranked=scoreCandidates([{market:"KRW-CHASE",return5m:.03,return15m:.06,turnoverGrowth15m:2,obvDirection:1,higherLow15m:false,resistanceProximity15m:0,structure1h:"neutral",highDistance1h:-.002}]);
+  assert.deepEqual(ranked,[]);
 });
 
 test("does not over-penalize a confirmed pullback and rebreak",()=>{
@@ -163,7 +162,7 @@ test("rewards rising OI, moderate funding, and early short liquidations",()=>{
 });
 
 test("marks excessive positive funding as no-chase",()=>{
-  const row={market:"KRW-HOT",return5m:.03,return15m:.08,turnoverGrowth15m:3,obvDirection:1,higherLow15m:true,resistanceProximity15m:0,structure1h:"sideways_breakout"};
+  const row={market:"KRW-HOT",return5m:.02,return15m:.03,turnoverGrowth15m:3,obvDirection:1,higherLow15m:true,resistanceProximity15m:0,structure1h:"sideways_breakout"};
   const [ranked]=scoreCandidates([row],{"KRW-HOT":{oiGrowth:.08,fundingRate:.001,shortLiquidationGrowth:3,longLiquidationGrowth:0}});
   assert.equal(ranked.state,"NO_CHASE");
 });

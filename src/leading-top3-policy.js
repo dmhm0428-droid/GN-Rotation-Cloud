@@ -21,6 +21,7 @@ function hardDiscardReasons(row){
   const globalSync=num(row?.globalExchangeSync??row?.details?.global_exchange_sync);
   const globalCount=num(row?.globalSpotExchangeCount??row?.details?.global_spot_exchange_count);
   const vwap=num(row?.vwapHold??row?.details?.vwap_hold);
+  const r60=num(row?.return60m),extension2h=num(row?.extensionFromLow2h);
   if(ev.lagging===true)reasons.push("후행 판정");
   if(String(row?.precursorStage||row?.details?.precursor?.confidence_stage||"").toUpperCase()==="REJECT_DECAY")reasons.push("전조 약화");
   if(eventRisk(row))reasons.push("이벤트/보안 리스크");
@@ -32,7 +33,18 @@ function hardDiscardReasons(row){
   if(vwap!=null&&vwap<0.35&&obv!=null&&obv<0)reasons.push("VWAP·OBV 동시 훼손");
   if(accel!=null&&accel>=12&&rise!=null&&rise>15)reasons.push("후반 거래량 과열/분배 위험");
   if(age!=null&&age>30&&repeat<2)reasons.push("30분 이상 재확인 없음");
+  if(row?.preExpansionEligible===false)reasons.push("이미 1시간/2시간 확장");
+  if(r60!=null&&r60>=.04)reasons.push("최근 60분 +4% 이상");
+  if(extension2h!=null&&extension2h>=.05)reasons.push("2시간 저점 대비 +5% 이상");
   return uniq(reasons);
+}
+
+function passesTop3Gate(row){
+  const repeat=Math.max(0,Number(row?.repeatCount)||0);
+  const count=num(row?.globalSpotExchangeCount);
+  const sync=num(row?.globalExchangeSync);
+  const lead=row?.empiricalValidation?.lead_core===true||row?.recommendationEligible===true;
+  return row?.preExpansionEligible===true&&lead&&repeat>=2&&count!=null&&count>=2&&sync!=null&&sync>=1&&num(row?.validationConfidence)>=80;
 }
 
 function lagReasons(row){
@@ -127,7 +139,7 @@ function decorate(row){
 function selectLeadingTop3(rows,{limit=3}={}){
   const decorated=(Array.isArray(rows)?rows:[]).map(decorate);
   const discarded=decorated.filter(r=>r.discarded).sort((a,b)=>(b.validationConfidence||0)-(a.validationConfidence||0));
-  const usable=decorated.filter(r=>!r.discarded&&!r.isLagging)
+  const usable=decorated.filter(r=>!r.discarded&&!r.isLagging&&passesTop3Gate(r))
     .sort((a,b)=>b.top3LeadScore-a.top3LeadScore||(Number(a.rank)||999)-(Number(b.rank)||999));
   const top3=usable.slice(0,limit).map((r,i)=>({...r,top3Rank:i+1}));
   const selected=new Set(top3.map(r=>String(r.market||"")));
@@ -138,4 +150,4 @@ function selectLeadingTop3(rows,{limit=3}={}){
   return {top3,nearMiss,discarded:discarded.slice(0,limit)};
 }
 
-module.exports={decorate,hardDiscardReasons,confidenceScore,lagReasons,missingLeadConditions,scoreLeading,selectLeadingTop3,stageOf};
+module.exports={decorate,hardDiscardReasons,confidenceScore,lagReasons,missingLeadConditions,passesTop3Gate,scoreLeading,selectLeadingTop3,stageOf};

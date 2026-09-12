@@ -10,7 +10,7 @@ const {
 const {enrichNewListingOverseas}=require("./new-listing-overseas");
 
 const UPBIT_BASE="https://api.upbit.com";
-const CANDLES_PER_MARKET=61;
+const CANDLES_PER_MARKET=181;
 const BATCH_SIZE=8;
 const BATCH_DELAY_MS=1100;
 const RAW_POOL=24;
@@ -86,17 +86,37 @@ async function foreignTicker(exchange,symbol,{fetchImpl=fetch}={}){
     const body=await fetchJson(url,{fetchImpl});const px=finite(body?.price);return px&&px>0?{exchange,price:px}:null;
   }catch{return null;}
 }
+async function foreignFlow(exchange,symbol,{fetchImpl=fetch}={}){
+  const pair=`${symbol}USDT`;
+  try{
+    const url=exchange==="binance"
+      ?`https://data-api.binance.vision/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=15m&limit=3`
+      :`https://api.mexc.com/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=15m&limit=3`;
+    const rows=await fetchJson(url,{fetchImpl});
+    if(!Array.isArray(rows)||rows.length<3)return null;
+    const previous=rows.at(-2),latest=rows.at(-1);
+    const priorClose=finite(previous?.[4]),close=finite(latest?.[4]);
+    const priorQuote=finite(previous?.[7]),quote=finite(latest?.[7]);
+    if(!(priorClose>0&&close>0&&priorQuote>0&&quote>=0))return null;
+    return {exchange,return15m:close/priorClose-1,quoteVolumeGrowth:quote/priorQuote-1};
+  }catch{return null;}
+}
 function median(values){const a=values.filter(Number.isFinite).sort((x,y)=>x-y);if(!a.length)return null;const m=Math.floor(a.length/2);return a.length%2?a[m]:(a[m-1]+a[m])/2;}
 async function enrichGlobalSpot(rows,{fetchImpl=fetch}={}){
   const fx=await upbitUsdtKrw({fetchImpl});
   return Promise.all((rows||[]).map(async row=>{
     const symbol=String(row.market||"").replace(/^KRW-/,"");
-    const refs=(await Promise.all([foreignTicker("binance",symbol,{fetchImpl}),foreignTicker("mexc",symbol,{fetchImpl})])).filter(Boolean);
+    const [refs,flows]=await Promise.all([
+      Promise.all([foreignTicker("binance",symbol,{fetchImpl}),foreignTicker("mexc",symbol,{fetchImpl})]),
+      Promise.all([foreignFlow("binance",symbol,{fetchImpl}),foreignFlow("mexc",symbol,{fetchImpl})])
+    ]).then(([a,b])=>[a.filter(Boolean),b.filter(Boolean)]);
     const refUsd=median(refs.map(x=>x.price));
     const krw=finite(row.krwPrice);
     const premium=krw!=null&&krw>0&&refUsd!=null&&refUsd>0&&fx!=null&&fx>0?krw/(refUsd*fx)-1:null;
-    const globalSpotOk=refs.length>=1&&premium!=null&&Math.abs(premium)<=.08;
-    return {...row,globalSpotAvailable:refs.length>0&&fx!=null,globalSpotOk,globalSpotVenues:refs.map(x=>x.exchange),globalSpotReferenceUsd:refUsd,globalSpotPremium:premium,globalUsdtKrw:fx};
+    const aligned=flows.filter(x=>x.return15m>=-.003&&x.quoteVolumeGrowth>-.35);
+    const globalExchangeSync=flows.length?aligned.length/flows.length:0;
+    const globalSpotOk=refs.length>=2&&flows.length>=2&&globalExchangeSync>=1&&premium!=null&&Math.abs(premium)<=.05;
+    return {...row,globalSpotAvailable:refs.length>=2&&flows.length>=2&&fx!=null,globalSpotOk,globalSpotVenues:refs.map(x=>x.exchange),globalSpotExchangeCount:flows.length,globalExchangeSync,globalSpotFlows:flows,globalSpotReferenceUsd:refUsd,globalSpotPremium:premium,globalUsdtKrw:fx};
   }));
 }
 
@@ -188,13 +208,14 @@ function assessImmediateEntry(row,persistence){
     obv:(finite(row.obvDirection)??0)>0,
     turnover:(finite(row.turnoverGrowth15m)??-1)>0,
     notExtended:r15!=null&&r15>-.01&&r15<MAX_ENTRY_RETURN_15M,
+    preExpansion:row.preExpansionEligible===true&&(finite(row.return60m)==null||finite(row.return60m)<.04)&&(finite(row.extensionFromLow2h)==null||finite(row.extensionFromLow2h)<.05),
     oneHour:String(row.structure1h||"")!=="downtrend",
     htf:row.htfEntryBlocked!==true,
     daily:(finite(row.dailyIgnitionScore)??0)>=55,
     accumulation:(finite(row.accumulationPersistenceScore)??0)>=45,
     risk:row.latePumpRisk!==true&&row.distributionRisk!==true&&row.heavyOldSellWall!==true&&row.individualRiskBlocked!==true,
     orderbook:row.orderbookAvailable===true&&positiveOrderbook&&row.orderbookEntryBlocked!==true,
-    globalSpot:row.globalSpotOk===true,
+    globalSpot:row.globalSpotOk===true&&(finite(row.globalSpotExchangeCount)??0)>=2&&(finite(row.globalExchangeSync)??0)>=1,
     derivatives:row.derivativeDataAvailable===true&&(finite(row.derivativeScore)??0)>=45,
     pricePlan:plan.valid,
     probability:prob>=MIN_PROBABILITY_SCORE
@@ -210,21 +231,21 @@ function watchlistSummary(rows){
 function snapshotRow(row,runId,ts,rank){
   const p=row.persistence||{},plan=row.entryPlan||{};
   return {
-    run_id:runId,ts,market:row.market,rank,score:row.probabilityScore??row.score,status:"ENTRY",krw_price:row.krwPrice??null,
+    run_id:runId,ts,market:row.market,rank,score:row.probabilityScore??row.score,status:row.entryAllowed===true?"ENTRY":"WATCH",krw_price:row.krwPrice??null,
     return5m:row.return5m??null,return15m:row.return15m??null,volume_ratio15m:row.turnoverGrowth15m??null,
     details:{
-      entry_allowed:true,top3_role:"GLOBAL_FLOW_VERIFIED_INVESTMENT_CANDIDATE",decision_reason:"즉시진입 기계검증 통과 · 5AI 최종게이트 대기",
+      entry_allowed:row.entryAllowed===true,top3_role:row.entryAllowed===true?"GLOBAL_FLOW_VERIFIED_INVESTMENT_CANDIDATE":"PRE_EXPANSION_WATCH",decision_reason:row.entryAllowed===true?"즉시진입 기계검증 통과 · 5AI 최종게이트 대기":"상승 전 감시 · 진입 금지",
       trade_plan:{entry_price:plan.entryPrice,entry_low:plan.entryLow,entry_high:plan.entryHigh,spread_pct:plan.spreadPct},
       first_detected_at:p.firstDetectedAt,first_detected_price:p.firstDetectedPrice,
       lead_lag:{probability_score:row.probabilityScore,lag_risk_score:row.lagRiskScore,repeat_count:p.repeatCount,scanner_score:row.score,rule:"ENTRY>=76 + 반복>=2 + OBV/거래대금 + HTF + 오더북 + 해외현물 + 파생 + 후행과열배제"},
-      expansion:{global_spot_ok:row.globalSpotOk===true,global_venues:row.globalSpotVenues||[],global_premium:row.globalSpotPremium??null,derivatives_ok:row.derivativeDataAvailable===true&&(finite(row.derivativeScore)??0)>=45,onchain_ok:row.onchainAvailable===true,onchain_neutral:row.onchainAvailable!==true},
+      expansion:{global_spot_ok:row.globalSpotOk===true,global_venues:row.globalSpotVenues||[],major_exchange_count:row.globalSpotExchangeCount??0,global_exchange_sync:row.globalExchangeSync??0,global_flows:row.globalSpotFlows||[],global_premium:row.globalSpotPremium??null,pre_expansion_eligible:row.preExpansionEligible===true,return_60m:row.return60m??null,return_120m:row.return120m??null,extension_from_low_2h:row.extensionFromLow2h??null,derivatives_ok:row.derivativeDataAvailable===true&&(finite(row.derivativeScore)??0)>=45,onchain_ok:row.onchainAvailable===true,onchain_neutral:row.onchainAvailable!==true},
       derivatives:{score:row.derivativeScore??null,data_available:row.derivativeDataAvailable===true},
       onchain:{available:row.onchainAvailable===true,provider_count:row.onchainProviderCount??0,score:row.onchainScore??null},
       structure:{higher_low_15m:row.higherLow15m??null,resistance_proximity_15m:row.resistanceProximity15m??null,structure_1h:row.structure1h??null,weekly:row.weeklyStructure??null,daily:row.dailyStructure??null},
       orderbook:{available:row.orderbookAvailable===true,signal:row.orderbookSignal??"UNKNOWN",entry_blocked:row.orderbookEntryBlocked??false,bid_imbalance:row.orderbookBidImbalance??null,ask_wall_depletion:row.orderbookAskWallDepletion??null,best_bid:row.orderbookBestBid??null,best_ask:row.orderbookBestAsk??null},
       daily_ignition:{score:row.dailyIgnitionScore??null,stage:row.dailyIgnitionStage??null,accumulation_score:row.accumulationPersistenceScore??null,obv_direction:row.dailyObvDirection??null},
       late_pump:{risk:row.latePumpRisk??false,penalty:row.latePumpPenalty??0,reasons:row.latePumpReasons||[]},
-      empirical_validation:{mechanical_score:row.probabilityScore,lead_core:true,lagging:false,recommendation_eligible:true,repeat:p.repeatCount,rule:"IMMEDIATE_ENTRY_V2"}
+      empirical_validation:{mechanical_score:row.probabilityScore,lead_core:row.preExpansionEligible===true&&row.globalSpotOk===true,lagging:row.preExpansionEligible!==true,recommendation_eligible:row.entryAllowed===true,repeat:p.repeatCount,rule:"PRE_EXPANSION_GLOBAL_FLOW_V3"}
     }
   };
 }
@@ -234,9 +255,11 @@ async function saveRun(db,ready,watchlist){
   const {data:run,error}=await db.from("gn_runs").insert({started_at:startedAt,status:"running",source_status:{source:"pre_pump_immediate_v2",ready_count:ready.length,watchlist:watchlistSummary(watchlist)}}).select("id").single();
   if(error)throw error;
   try{
-    const rows=ready.slice(0,3).map((row,index)=>snapshotRow(row,run.id,startedAt,index+1));
+    // The schema intentionally stores three ranked rows. Store the earliest
+    // validated WATCH candidates too; waiting for ENTRY made every history row late.
+    const rows=watchlist.slice(0,3).map((row,index)=>snapshotRow(row,run.id,startedAt,index+1));
     if(rows.length){const inserted=await db.from("gn_pre_pump_snapshots").insert(rows);if(inserted.error)throw inserted.error;}
-    await db.from("gn_runs").update({finished_at:new Date().toISOString(),status:"success",source_status:{source:"pre_pump_immediate_v2",ready_count:rows.length,watchlist:watchlistSummary(watchlist)}}).eq("id",run.id);
+    await db.from("gn_runs").update({finished_at:new Date().toISOString(),status:"success",source_status:{source:"pre_pump_immediate_v2",engine_version:"PRE_EXPANSION_GLOBAL_FLOW_V3",ready_count:ready.length,stored_watch_count:rows.length,watchlist:watchlistSummary(watchlist)}}).eq("id",run.id);
     return {runId:run.id,ts:startedAt,stored:rows.length};
   }catch(error){await db.from("gn_runs").update({finished_at:new Date().toISOString(),status:"error",error:String(error?.message||error)}).eq("id",run.id);throw error;}
 }
@@ -259,4 +282,4 @@ async function main({env=process.env,fetchImpl=fetch,sleep=sleepDefault,db=dbFro
 }
 
 if(require.main===module)main().catch(error=>{console.error(error?.stack||error?.message||error);process.exitCode=1;});
-module.exports={assessImmediateEntry,derivativeMapFor,enrichGlobalSpot,enrichOnchain,entryPlan,lagRiskScore,main,persistenceFor,probabilityScore,scanWide,snapshotRow,watchlistSummary};
+module.exports={assessImmediateEntry,derivativeMapFor,enrichGlobalSpot,enrichOnchain,entryPlan,foreignFlow,lagRiskScore,main,persistenceFor,probabilityScore,scanWide,snapshotRow,watchlistSummary};

@@ -1,7 +1,7 @@
 "use strict";
 
 const UPBIT_BASE="https://api.upbit.com";
-const CANDLES_PER_MARKET=61;
+const CANDLES_PER_MARKET=181;
 const BATCH_SIZE=8;
 const BATCH_DELAY_MS=1100;
 const DAILY_RISK_COUNT=35;
@@ -198,7 +198,14 @@ function calculateMetrics(market,candles){
   if(recent.length<10||previous.length<10)return null;
   const turnover=sumTurnover(recent),previousTurnover=sumTurnover(previous);if(previousTurnover<=0)return null;
   const structure15m=calculate15mStructure(ordered),structure1h=classify1hStructure(ordered);
-  return {market,symbol:market.replace(/^KRW-/,""),return5m:latestPrice/price5-1,return15m:latestPrice/price15-1,turnoverGrowth15m:turnover/previousTurnover-1,obvDirection:calculateObvDirection(ordered),higherLow15m:structure15m.higherLow,resistanceProximity15m:structure15m.resistanceProximity,structure1h,highDistance1h:highDistance1h(ordered),pullbackRebreak1h:structure15m.higherLow&&structure1h==="sideways_breakout"};
+  const price60=Number(closeAtOrBefore(ordered,latestTime-60*60*1000));
+  const price120=Number(closeAtOrBefore(ordered,latestTime-120*60*1000));
+  const low120=Math.min(...ordered.filter(c=>candleTime(c)>=latestTime-120*60*1000).map(c=>price(c,"low_price")).filter(Number.isFinite));
+  const return60m=price60>0?latestPrice/price60-1:null;
+  const return120m=price120>0?latestPrice/price120-1:null;
+  const extensionFromLow2h=low120>0?latestPrice/low120-1:null;
+  const preExpansionEligible=(return60m==null||return60m<.04)&&(extensionFromLow2h==null||extensionFromLow2h<.05);
+  return {market,symbol:market.replace(/^KRW-/,""),return5m:latestPrice/price5-1,return15m:latestPrice/price15-1,return60m,return120m,extensionFromLow2h,preExpansionEligible,turnoverGrowth15m:turnover/previousTurnover-1,obvDirection:calculateObvDirection(ordered),higherLow15m:structure15m.higherLow,resistanceProximity15m:structure15m.resistanceProximity,structure1h,highDistance1h:highDistance1h(ordered),pullbackRebreak1h:structure15m.higherLow&&structure1h==="sideways_breakout"};
 }
 
 function percentileRanks(rows,key){const sorted=rows.map(row=>Number(row[key])||0).slice().sort((a,b)=>a-b);const scale=Math.max(1,sorted.length-1);return new Map(rows.map(row=>[row.market,sorted.indexOf(Number(row[key])||0)/scale]));}
@@ -224,7 +231,7 @@ function highChasePenalty(row){
 }
 
 function scoreCandidates(metrics,derivatives={}){
-  const eligible=metrics.filter(row=>row&&row.return5m>-.01&&row.return15m>-.015&&row.return15m<0.10&&row.turnoverGrowth15m>0);if(!eligible.length)return [];
+  const eligible=metrics.filter(row=>row&&row.return5m>-.01&&row.return15m>-.015&&row.return15m<.04&&row.preExpansionEligible!==false&&row.turnoverGrowth15m>0);if(!eligible.length)return [];
   const r5=percentileRanks(eligible,"return5m"),r15=percentileRanks(eligible,"return15m"),volume=percentileRanks(eligible,"turnoverGrowth15m"),obv=percentileRanks(eligible.map(row=>({...row,obvDirection:Number(row.obvDirection)||0})),"obvDirection");
   return eligible.map(row=>{
     const proximity=Number.isFinite(row.resistanceProximity15m)?resistanceScore(row.resistanceProximity15m):.5,higherLowBase=row.higherLow15m===true?.6:row.higherLow15m===false?0:.3,structure15=higherLowBase+proximity*.4,structure1h={sideways_breakout:1,uptrend:.7,neutral:.45,unknown:.5,downtrend:0}[row.structure1h||"unknown"]??.5;
