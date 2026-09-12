@@ -24,3 +24,11 @@ test("single TOP3 renderer injected browser JavaScript parses",()=>{
   const body=injectedBody("dashboard-leading-top3-v2.js","gn-leading-top3-v2-ui");
   assert.doesNotThrow(()=>new Function(body));
 });
+
+test("authoritative domestic-stock tab shows current and both buy ranges",()=>{
+  const src=fs.readFileSync(path.resolve(__dirname,"..","src","dashboard-authoritative-v1.js"),"utf8");
+  assert.match(src,/\/api\/risk-buy-fx/);
+  assert.match(src,/현재가 · 1차 · 2차 매수가/);
+  assert.match(src,/1차 .*first/);
+  assert.match(src,/2차 .*second/);
+});
