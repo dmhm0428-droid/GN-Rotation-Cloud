@@ -34,6 +34,7 @@ function runAssistant(){
 // Response wrappers run in reverse preload order. Put final UI post-processors first,
 // then the authoritative renderer, so the post-processors receive its final HTML.
 const preloads=[
+  "dashboard-sector-portfolio-v1.js",
   "dashboard-policy-alert-v1.js",
   "dashboard-top3-revalidation-v3.js",
   "dashboard-us-stock-footprint-v1.js",
