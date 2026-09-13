@@ -7,8 +7,10 @@ const PROVIDERS=["PERPLEXITY","XAI","DEEPSEEK","ANTHROPIC","GEMINI"];
 const aiProviderCompat=path.resolve(__dirname,"ai-provider-compat-patch.js");
 let aiRunning=false;
 let assistantRunning=false;
+let eventLeadRunning=false;
 let retryTimer=null;
 let assistantRetryTimer=null;
+let eventLeadRetryTimer=null;
 
 function aiEnv(){
   const env={...process.env,AI_ANALYSIS_ENABLED:"true"};
@@ -30,6 +32,12 @@ function runAssistant(){
   child.on("exit",code=>{assistantRunning=false;if(code!==0){console.error(`GN investment assistant scheduler exited with code ${code}; retrying in 60s`);clearTimeout(assistantRetryTimer);assistantRetryTimer=setTimeout(runAssistant,60000);}});
   child.on("error",error=>{assistantRunning=false;console.error("GN investment assistant scheduler spawn error",error?.message||error);clearTimeout(assistantRetryTimer);assistantRetryTimer=setTimeout(runAssistant,60000);});
 }
+function runEventLead(){
+  if(eventLeadRunning)return;eventLeadRunning=true;
+  const child=spawn(process.execPath,["src/event-lead-runner.js"],{env:process.env,stdio:"inherit"});
+  child.on("exit",code=>{eventLeadRunning=false;if(code!==0){console.error(`GN event-lead collector exited with code ${code}; retrying in 60s`);clearTimeout(eventLeadRetryTimer);eventLeadRetryTimer=setTimeout(runEventLead,60000);}});
+  child.on("error",error=>{eventLeadRunning=false;console.error("GN event-lead collector spawn error",error?.message||error);clearTimeout(eventLeadRetryTimer);eventLeadRetryTimer=setTimeout(runEventLead,60000);});
+}
 
 // Response wrappers run in reverse preload order. Put final UI post-processors first,
 // then the authoritative renderer, so the post-processors receive its final HTML.
@@ -43,6 +51,7 @@ const preloads=[
   "dashboard-ui-health-v1.js",
   "dashboard-cleanup-watchlist-v1.js",
   "dashboard-4h-chase-guard.js",
+  "dashboard-event-lead-v1.js",
   "dashboard-leading-top3-v2.js",
   "dashboard-big-picture-v1.js",
   "dashboard-metals-live-v1.js",
@@ -60,6 +69,6 @@ const preloads=[
 const serverEnv={...process.env,NODE_OPTIONS:[process.env.NODE_OPTIONS,...preloads.map(x=>`--require=${x}`)].filter(Boolean).join(" ")};
 const server=spawn(process.execPath,["src/server.js"],{env:serverEnv,stdio:"inherit"});
 server.on("exit",code=>process.exit(code??0));
-setTimeout(runAi,5000);setTimeout(runAssistant,12000);
-setInterval(runAi,60*1000).unref();setInterval(runAssistant,60*1000).unref();
-for(const sig of ["SIGTERM","SIGINT"]){process.on(sig,()=>{clearTimeout(retryTimer);clearTimeout(assistantRetryTimer);if(!server.killed)server.kill(sig);});}
+setTimeout(runAi,5000);setTimeout(runAssistant,12000);setTimeout(runEventLead,18000);
+setInterval(runAi,60*1000).unref();setInterval(runAssistant,60*1000).unref();setInterval(runEventLead,5*60*1000).unref();
+for(const sig of ["SIGTERM","SIGINT"]){process.on(sig,()=>{clearTimeout(retryTimer);clearTimeout(assistantRetryTimer);clearTimeout(eventLeadRetryTimer);if(!server.killed)server.kill(sig);});}
