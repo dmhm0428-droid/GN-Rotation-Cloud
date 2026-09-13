@@ -18,7 +18,7 @@ const VALIDATION_POOL=12;
 const MIN_ENTRY_SCORE=76;
 const MIN_PROBABILITY_SCORE=78;
 const MAX_ENTRY_RETURN_15M=.05;
-const RECENT_WATCH_MS=45*60*1000;
+const RECENT_WATCH_MS=130*60*1000;
 
 const clamp=(v,a=0,b=100)=>Math.max(a,Math.min(b,v));
 const finite=v=>Number.isFinite(Number(v))?Number(v):null;
@@ -138,16 +138,40 @@ async function enrichOnchain(rows,db){
 
 async function recentWatchRuns(db){
   const since=new Date(Date.now()-RECENT_WATCH_MS).toISOString();
-  const {data}=await db.from("gn_runs").select("started_at,source_status").gte("started_at",since).order("started_at",{ascending:false}).limit(8);
+  const {data}=await db.from("gn_runs").select("started_at,source_status").gte("started_at",since).order("started_at",{ascending:false}).limit(24);
   return (data||[]).filter(r=>String(r?.source_status?.source||"")==="pre_pump_immediate_v2");
 }
+
+function timeFlowFor(row,runs){
+  const market=row.market;
+  const points=[];
+  for(const run of (runs||[]).slice().reverse()){
+    const hit=(run?.source_status?.watchlist||[]).find(x=>x?.market===market);
+    const growth=finite(hit?.turnoverGrowth15m);
+    if(growth!=null)points.push({ts:run.started_at,ratio:Math.max(0,1+growth)});
+  }
+  const currentGrowth=finite(row.turnoverGrowth15m);
+  if(currentGrowth!=null)points.push({ts:new Date().toISOString(),ratio:Math.max(0,1+currentGrowth)});
+  const compact=points.slice(-8);
+  if(compact.length<3)return {timeFlowAvailable:false,timeFlowScore:null,timeFlowTrend:null,timeFlowPositiveSteps:0,timeFlowSeries:compact};
+  const ratios=compact.map(x=>x.ratio),first=ratios[0],latest=ratios.at(-1),prev=ratios.at(-2);
+  let positive=0;for(let i=1;i<ratios.length;i++)if(ratios[i]>ratios[i-1])positive++;
+  const trend=latest-first,steps=ratios.length-1,accel=latest-prev;
+  let score=50;
+  score+=clamp(trend*28,-28,28);
+  score+=(positive/steps-.5)*30;
+  if(latest>=1.2&&latest<=3.5)score+=12;else if(latest>3.5&&latest<=5)score-=5;else if(latest>5)score-=25;
+  if(accel>0&&latest<4)score+=Math.min(8,accel*12);if(accel<-.35)score-=10;
+  return {timeFlowAvailable:true,timeFlowScore:+clamp(score).toFixed(2),timeFlowTrend:+trend.toFixed(3),timeFlowPositiveSteps:positive,timeFlowSeries:compact};
+}
+
 function persistenceFor(row,runs){
   const market=row.market;let repeats=1,firstAt=null,firstPrice=null;
   for(const run of (runs||[]).slice().reverse()){
     const hit=(run?.source_status?.watchlist||[]).find(x=>x?.market===market);
     if(hit){repeats++;if(!firstAt){firstAt=run.started_at;firstPrice=finite(hit.krwPrice);}}
   }
-  return {repeatCount:repeats,firstDetectedAt:firstAt||new Date().toISOString(),firstDetectedPrice:firstPrice??finite(row.krwPrice)};
+  return {repeatCount:repeats,firstDetectedAt:firstAt||new Date().toISOString(),firstDetectedPrice:firstPrice??finite(row.krwPrice),...timeFlowFor(row,runs)};
 }
 
 function orderbookQuality(row){
@@ -178,14 +202,16 @@ function lagRiskScore(row){
   return clamp(risk);
 }
 function probabilityScore(row,persistence){
+  if(persistence?.timeFlowAvailable!==true)return null;
   const scanner=clamp(finite(row.score)??0);
   const daily=clamp(finite(row.dailyIgnitionScore)??50);
   const accum=clamp(finite(row.accumulationPersistenceScore)??50);
   const orderbook=orderbookQuality(row);
   const deriv=row.derivativeDataAvailable===true?clamp(finite(row.derivativeScore)??50):35;
   const global=row.globalSpotOk===true?90:30;
-  const repeat=persistence.repeatCount>=3?100:persistence.repeatCount===2?82:40;
-  const raw=scanner*.40+daily*.15+accum*.10+orderbook*.10+deriv*.10+global*.10+repeat*.05;
+  const repeat=persistence.repeatCount>=4?100:persistence.repeatCount===3?90:persistence.repeatCount===2?75:35;
+  const flow=clamp(finite(persistence.timeFlowScore)??0);
+  const raw=flow*.25+scanner*.25+daily*.10+accum*.08+orderbook*.08+deriv*.08+global*.08+repeat*.08;
   return +clamp(raw-lagRiskScore(row)*.45).toFixed(2);
 }
 function entryPlan(row){
@@ -205,6 +231,7 @@ function assessImmediateEntry(row,persistence){
   const hard={
     scannerEntry:String(row.state||"")==="ENTRY"&&score>=MIN_ENTRY_SCORE,
     repeat:persistence.repeatCount>=2,
+    timeFlow:persistence.timeFlowAvailable===true&&(finite(persistence.timeFlowScore)??0)>=60,
     obv:(finite(row.obvDirection)??0)>0,
     turnover:(finite(row.turnoverGrowth15m)??-1)>0,
     notExtended:r15!=null&&r15>-.01&&r15<MAX_ENTRY_RETURN_15M,
@@ -218,15 +245,15 @@ function assessImmediateEntry(row,persistence){
     globalSpot:row.globalSpotOk===true&&(finite(row.globalSpotExchangeCount)??0)>=2&&(finite(row.globalExchangeSync)??0)>=1,
     derivatives:row.derivativeDataAvailable===true&&(finite(row.derivativeScore)??0)>=45,
     pricePlan:plan.valid,
-    probability:prob>=MIN_PROBABILITY_SCORE
+    probability:prob!=null&&prob>=MIN_PROBABILITY_SCORE
   };
   for(const [key,ok] of Object.entries(hard))if(!ok)reasons.push(key);
   const entryAllowed=Object.values(hard).every(Boolean);
-  return {...row,persistence,probabilityScore:prob,lagRiskScore:lagRiskScore(row),entryPlan:plan,entryAllowed,entryReasons:reasons,state:entryAllowed?"ENTRY":String(row.state||"SCOUT")==="ENTRY"?"SCOUT":String(row.state||"SCOUT")};
+  return {...row,persistence,probabilityScore:prob,timeFlowScore:persistence.timeFlowScore??null,timeFlowAvailable:persistence.timeFlowAvailable===true,lagRiskScore:lagRiskScore(row),entryPlan:plan,entryAllowed,entryReasons:reasons,state:entryAllowed?"ENTRY":String(row.state||"SCOUT")==="ENTRY"?"SCOUT":String(row.state||"SCOUT")};
 }
 
 function watchlistSummary(rows){
-  return (rows||[]).slice(0,VALIDATION_POOL).map(row=>({market:row.market,score:row.score,state:row.state,krwPrice:row.krwPrice??null,probabilityScore:row.probabilityScore??null,lagRiskScore:row.lagRiskScore??null,entryAllowed:row.entryAllowed===true}));
+  return (rows||[]).slice(0,VALIDATION_POOL).map(row=>({market:row.market,score:row.score,state:row.state,krwPrice:row.krwPrice??null,turnoverGrowth15m:row.turnoverGrowth15m??null,obvDirection:row.obvDirection??null,timeFlowScore:row.timeFlowScore??null,probabilityScore:row.probabilityScore??null,lagRiskScore:row.lagRiskScore??null,entryAllowed:row.entryAllowed===true}));
 }
 function snapshotRow(row,runId,ts,rank){
   const p=row.persistence||{},plan=row.entryPlan||{};
@@ -234,10 +261,10 @@ function snapshotRow(row,runId,ts,rank){
     run_id:runId,ts,market:row.market,rank,score:row.probabilityScore??row.score,status:row.entryAllowed===true?"ENTRY":"WATCH",krw_price:row.krwPrice??null,
     return5m:row.return5m??null,return15m:row.return15m??null,volume_ratio15m:row.turnoverGrowth15m??null,
     details:{
-      entry_allowed:row.entryAllowed===true,top3_role:row.entryAllowed===true?"GLOBAL_FLOW_VERIFIED_INVESTMENT_CANDIDATE":"PRE_EXPANSION_WATCH",decision_reason:row.entryAllowed===true?"즉시진입 기계검증 통과 · 5AI 최종게이트 대기":"상승 전 감시 · 진입 금지",
+      entry_allowed:row.entryAllowed===true,top3_role:row.entryAllowed===true?"GLOBAL_FLOW_VERIFIED_INVESTMENT_CANDIDATE":"PRE_EXPANSION_WATCH",decision_reason:row.entryAllowed===true?"시간흐름+즉시진입 기계검증 통과":"상승 전 감시 · 진입 금지",
       trade_plan:{entry_price:plan.entryPrice,entry_low:plan.entryLow,entry_high:plan.entryHigh,spread_pct:plan.spreadPct},
       first_detected_at:p.firstDetectedAt,first_detected_price:p.firstDetectedPrice,
-      lead_lag:{probability_score:row.probabilityScore,lag_risk_score:row.lagRiskScore,repeat_count:p.repeatCount,scanner_score:row.score,rule:"ENTRY>=76 + 반복>=2 + OBV/거래대금 + HTF + 오더북 + 해외현물 + 파생 + 후행과열배제"},
+      lead_lag:{probability_score:row.probabilityScore,lag_risk_score:row.lagRiskScore,repeat_count:p.repeatCount,scanner_score:row.score,time_flow_score:p.timeFlowScore??null,time_flow_available:p.timeFlowAvailable===true,time_flow_series:p.timeFlowSeries||[],rule:"T-120~NOW 거래량 시간흐름 + ENTRY>=76 + 반복>=2 + OBV + HTF + 오더북 + 해외현물 + 파생 + 후행과열배제"},
       expansion:{global_spot_ok:row.globalSpotOk===true,global_venues:row.globalSpotVenues||[],major_exchange_count:row.globalSpotExchangeCount??0,global_exchange_sync:row.globalExchangeSync??0,global_flows:row.globalSpotFlows||[],global_premium:row.globalSpotPremium??null,pre_expansion_eligible:row.preExpansionEligible===true,return_60m:row.return60m??null,return_120m:row.return120m??null,extension_from_low_2h:row.extensionFromLow2h??null,derivatives_ok:row.derivativeDataAvailable===true&&(finite(row.derivativeScore)??0)>=45,onchain_ok:row.onchainAvailable===true,onchain_neutral:row.onchainAvailable!==true},
       derivatives:{score:row.derivativeScore??null,data_available:row.derivativeDataAvailable===true},
       onchain:{available:row.onchainAvailable===true,provider_count:row.onchainProviderCount??0,score:row.onchainScore??null},
@@ -245,7 +272,7 @@ function snapshotRow(row,runId,ts,rank){
       orderbook:{available:row.orderbookAvailable===true,signal:row.orderbookSignal??"UNKNOWN",entry_blocked:row.orderbookEntryBlocked??false,bid_imbalance:row.orderbookBidImbalance??null,ask_wall_depletion:row.orderbookAskWallDepletion??null,best_bid:row.orderbookBestBid??null,best_ask:row.orderbookBestAsk??null},
       daily_ignition:{score:row.dailyIgnitionScore??null,stage:row.dailyIgnitionStage??null,accumulation_score:row.accumulationPersistenceScore??null,obv_direction:row.dailyObvDirection??null},
       late_pump:{risk:row.latePumpRisk??false,penalty:row.latePumpPenalty??0,reasons:row.latePumpReasons||[]},
-      empirical_validation:{mechanical_score:row.probabilityScore,lead_core:row.preExpansionEligible===true&&row.globalSpotOk===true,lagging:row.preExpansionEligible!==true,recommendation_eligible:row.entryAllowed===true,repeat:p.repeatCount,rule:"PRE_EXPANSION_GLOBAL_FLOW_V3"}
+      empirical_validation:{mechanical_score:row.probabilityScore,lead_core:row.preExpansionEligible===true&&row.globalSpotOk===true&&p.timeFlowAvailable===true,lagging:row.preExpansionEligible!==true,recommendation_eligible:row.entryAllowed===true,repeat:p.repeatCount,time_flow_score:p.timeFlowScore??null,rule:"PRE_EXPANSION_TIME_FLOW_V4"}
     }
   };
 }
@@ -255,11 +282,9 @@ async function saveRun(db,ready,watchlist){
   const {data:run,error}=await db.from("gn_runs").insert({started_at:startedAt,status:"running",source_status:{source:"pre_pump_immediate_v2",ready_count:ready.length,watchlist:watchlistSummary(watchlist)}}).select("id").single();
   if(error)throw error;
   try{
-    // The schema intentionally stores three ranked rows. Store the earliest
-    // validated WATCH candidates too; waiting for ENTRY made every history row late.
     const rows=watchlist.slice(0,3).map((row,index)=>snapshotRow(row,run.id,startedAt,index+1));
     if(rows.length){const inserted=await db.from("gn_pre_pump_snapshots").insert(rows);if(inserted.error)throw inserted.error;}
-    await db.from("gn_runs").update({finished_at:new Date().toISOString(),status:"success",source_status:{source:"pre_pump_immediate_v2",engine_version:"PRE_EXPANSION_GLOBAL_FLOW_V3",ready_count:ready.length,stored_watch_count:rows.length,watchlist:watchlistSummary(watchlist)}}).eq("id",run.id);
+    await db.from("gn_runs").update({finished_at:new Date().toISOString(),status:"success",source_status:{source:"pre_pump_immediate_v2",engine_version:"PRE_EXPANSION_TIME_FLOW_V4",ready_count:ready.length,stored_watch_count:rows.length,watchlist:watchlistSummary(watchlist)}}).eq("id",run.id);
     return {runId:run.id,ts:startedAt,stored:rows.length};
   }catch(error){await db.from("gn_runs").update({finished_at:new Date().toISOString(),status:"error",error:String(error?.message||error)}).eq("id",run.id);throw error;}
 }
@@ -274,12 +299,12 @@ async function main({env=process.env,fetchImpl=fetch,sleep=sleepDefault,db=dbFro
   const orderbook=await enrichOrderbookSignals(overseas,{fetchImpl,sleep});
   const global=await enrichGlobalSpot(orderbook,{fetchImpl});
   const onchain=await enrichOnchain(global,db);
-  const assessed=onchain.map(row=>assessImmediateEntry(row,persistenceFor(row,priorRuns))).sort((a,b)=>(b.entryAllowed-a.entryAllowed)||(Number(b.probabilityScore)-Number(a.probabilityScore)));
+  const assessed=onchain.map(row=>assessImmediateEntry(row,persistenceFor(row,priorRuns))).sort((a,b)=>(b.entryAllowed-a.entryAllowed)||((Number(b.probabilityScore)||0)-(Number(a.probabilityScore)||0)));
   const ready=assessed.filter(row=>row.entryAllowed).slice(0,3);
   const stored=await saveRun(db,ready,assessed);
-  console.log(JSON.stringify({ok:true,...stored,ready:ready.map(row=>({market:row.market,probabilityScore:row.probabilityScore,entryPlan:row.entryPlan,repeatCount:row.persistence.repeatCount}))}));
+  console.log(JSON.stringify({ok:true,...stored,ready:ready.map(row=>({market:row.market,probabilityScore:row.probabilityScore,timeFlowScore:row.timeFlowScore,entryPlan:row.entryPlan,repeatCount:row.persistence.repeatCount}))}));
   return ready;
 }
 
 if(require.main===module)main().catch(error=>{console.error(error?.stack||error?.message||error);process.exitCode=1;});
-module.exports={assessImmediateEntry,derivativeMapFor,enrichGlobalSpot,enrichOnchain,entryPlan,foreignFlow,lagRiskScore,main,persistenceFor,probabilityScore,scanWide,snapshotRow,watchlistSummary};
+module.exports={assessImmediateEntry,derivativeMapFor,enrichGlobalSpot,enrichOnchain,entryPlan,foreignFlow,lagRiskScore,main,persistenceFor,probabilityScore,scanWide,snapshotRow,timeFlowFor,watchlistSummary};
