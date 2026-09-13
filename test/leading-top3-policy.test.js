@@ -1,10 +1,13 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {selectLeadingTop3,stageOf}=require("../src/leading-top3-policy");
+const {selectLeadingTop3,stageOf,timeFlowSignal,empiricalProbability}=require("../src/leading-top3-policy");
 
+function flow(values=[1.05,1.12,1.25,1.45,1.75]){
+  return [120,60,30,15,0].map((offsetMin,index)=>({offsetMin,ratio:values[index]}));
+}
 function row(market,rank,overrides={}){
-  return {market,rank,mechanicalScore:85,maAlignment:75,ma20Slope:.25,obv1h:.25,volumeAccel5m:2,repeatCount:2,riseSinceFirstPct:1,candidateAgeMin:1,preExpansionEligible:true,return60m:.01,extensionFromLow2h:.02,globalSpotExchangeCount:2,globalExchangeSync:1,empiricalValidation:{lead_core:true,lagging:false},...overrides};
+  return {market,rank,mechanicalScore:85,maAlignment:75,ma20Slope:.25,obv1h:.25,volumeAccel5m:2,repeatCount:2,riseSinceFirstPct:1,candidateAgeMin:1,preExpansionEligible:true,return60m:.01,extensionFromLow2h:.02,globalSpotExchangeCount:2,globalExchangeSync:1,volumeTimeSeries:flow(),empiricalValidation:{lead_core:true,lagging:false},...overrides};
 }
 
 test("TOP3 only uses repeated, globally confirmed pre-expansion candidates",()=>{
@@ -61,4 +64,31 @@ test("a candidate already four percent above the last hour is discarded",()=>{
   const out=selectLeadingTop3([row("KRW-LATE",1,{return60m:.041,preExpansionEligible:false}),row("KRW-EARLY",2)]);
   assert.deepEqual(out.top3.map(x=>x.market),["KRW-EARLY"]);
   assert.ok(out.discarded[0].discardReasons.some(x=>x.includes("확장")||x.includes("60분")));
+});
+
+test("TOP3 requires measurable rising turnover across time, not a single hot snapshot",()=>{
+  const rising=row("KRW-RISING",1,{volumeTimeSeries:flow([1.02,1.08,1.20,1.42,1.80])});
+  const fading=row("KRW-FADING",2,{mechanicalScore:99,volumeTimeSeries:flow([2.4,2.1,1.8,1.45,1.20])});
+  const out=selectLeadingTop3([fading,rising]);
+  assert.deepEqual(out.top3.map(x=>x.market),["KRW-RISING"]);
+  assert.ok(timeFlowSignal(rising).score>=60);
+  assert.ok(timeFlowSignal(fading).score<60);
+});
+
+test("missing T-120 to current turnover history is not allowed into TOP3",()=>{
+  const out=selectLeadingTop3([row("KRW-NO-HISTORY",1,{volumeTimeSeries:[]}),row("KRW-WITH-HISTORY",2)]);
+  assert.deepEqual(out.top3.map(x=>x.market),["KRW-WITH-HISTORY"]);
+  const miss=out.nearMiss.find(x=>x.market==="KRW-NO-HISTORY");
+  assert.ok(miss.lagReasons.some(x=>x.includes("시계열")));
+});
+
+test("probability is only marked verified when backed by an explicit empirical hit rate and adequate sample",()=>{
+  const none=empiricalProbability(row("KRW-NONE",1));
+  assert.equal(none.available,false);
+  const small=empiricalProbability(row("KRW-SMALL",1,{empiricalHitRate24h:.72,empiricalSampleSize:12}));
+  assert.equal(small.rate,72);
+  assert.equal(small.verified,false);
+  const verified=empiricalProbability(row("KRW-VERIFIED",1,{empiricalHitRate24h:68,empiricalSampleSize:45}));
+  assert.equal(verified.rate,68);
+  assert.equal(verified.verified,true);
 });
