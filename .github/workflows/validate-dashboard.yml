@@ -59,6 +59,7 @@ jobs:
           if [ "$ok" != "1" ]; then echo 'GN UI health did not become ready'; cat /tmp/gn-server.log; exit 1; fi
           grep -q '"ok":true' /tmp/ui-health.json || exit 1
           grep -q 'GN_UI_CANONICAL_20260905_V3' /tmp/ui-health.json || exit 1
+          grep -q 'TOP3_5AI_FAIL_CLOSED_20260914_V1' /tmp/ui-health.json || exit 1
           grep -q '"canonicalDashboardOwner":"dashboard-authoritative-v1"' /tmp/ui-health.json || exit 1
           grep -q '"partialLoaderDisabled":true' /tmp/ui-health.json || exit 1
           curl -fsS --max-time 3 http://127.0.0.1:3100/login > /tmp/login.html || { cat /tmp/gn-server.log; exit 1; }
@@ -113,7 +114,7 @@ jobs:
           health_code="$(curl -L -sS -o /tmp/health -w '%{http_code}' --connect-timeout 5 --max-time 12 "$base/health" || true)"
           login_code="$(curl -L -sS -o /tmp/login -w '%{http_code}' --connect-timeout 5 --max-time 12 "$base/login" || true)"
           echo "LIVE_CODES ui=$ui_code health=$health_code login=$login_code"
-          if [ "$ui_code" = "200" ] && grep -q '"ok":true' /tmp/ui-health && grep -q 'GN_UI_CANONICAL_20260905_V3' /tmp/ui-health; then
+          if [ "$ui_code" = "200" ] && grep -q '"ok":true' /tmp/ui-health && grep -q 'GN_UI_CANONICAL_20260905_V3' /tmp/ui-health && grep -q 'TOP3_5AI_FAIL_CLOSED_20260914_V1' /tmp/ui-health; then
             grep -q 'GN PIVOT' /tmp/login
             echo "LIVE_RENDER_UI_OK=$base"
             exit 0
