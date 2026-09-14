@@ -64,3 +64,15 @@ test("timeFlowFor scores rising repeated turnover observations higher than fadin
   assert.ok(rising.timeFlowScore>fading.timeFlowScore);
   assert.ok(rising.timeFlowScore>=60);
 });
+
+
+test("mechanically ready candidate is stored as SCOUT until row-level five-AI approval",()=>{
+  const assessed=assessImmediateEntry(goodRow(),goodPersistence());
+  const stored=snapshotRow(assessed,"run-2","2026-09-01T00:02:00Z",1);
+  assert.equal(assessed.entryAllowed,true);
+  assert.equal(stored.status,"SCOUT");
+  assert.equal(stored.details.mechanical_entry_ready,true);
+  assert.equal(stored.details.five_ai_gate_ok,false);
+  assert.equal(stored.details.entry_allowed,false);
+  assert.equal(stored.details.empirical_validation.recommendation_eligible,false);
+});
