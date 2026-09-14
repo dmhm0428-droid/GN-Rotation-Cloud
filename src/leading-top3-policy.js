@@ -100,11 +100,20 @@ function hardDiscardReasons(row){
 
 function passesTop3Gate(row){
   const repeat=Math.max(0,Number(row?.repeatCount)||0);
-  const count=num(row?.globalSpotExchangeCount);
-  const sync=num(row?.globalExchangeSync);
+  const count=num(row?.globalSpotExchangeCount??row?.details?.global_spot_exchange_count);
+  const sync=num(row?.globalExchangeSync??row?.details?.global_exchange_sync);
   const lead=row?.empiricalValidation?.lead_core===true||row?.recommendationEligible===true;
   const flow=timeFlowSignal(row);
-  return row?.preExpansionEligible===true&&lead&&repeat>=2&&count!=null&&count>=2&&sync!=null&&sync>=1&&flow.available&&flow.score>=60&&num(row?.validationConfidence)>=80;
+  const status=String(row?.scannerStatus||row?.status||"").toUpperCase();
+  const scannerLead=status==="SCOUT"||status==="ENTRY"||status==="WATCH";
+  const globalConfirmed=count!=null&&count>=2&&sync!=null&&sync>=.55;
+  const globalMissing=count==null&&sync==null;
+  const strictEntry=row?.strictImmediate===true||row?.entryAllowed===true;
+  const core=row?.preExpansionEligible===true&&(lead||scannerLead)&&repeat>=2&&flow.available&&flow.score>=60;
+  if(!core)return false;
+  // ENTRY remains fail-closed. A missing overseas confirmation can only produce SCOUT.
+  if(strictEntry)return globalConfirmed&&num(row?.validationConfidence)>=80;
+  return (globalConfirmed||globalMissing)&&num(row?.validationConfidence)>=68;
 }
 
 function lagReasons(row){

@@ -11,8 +11,8 @@ const {selectLeadingTop3}=require("./leading-top3-policy");
 const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
 
 const FRESH_MS=12*60*1000;
-const HISTORY_MS=30*60*1000;
-const HISTORY_LIMIT=120;
+const HISTORY_MS=130*60*1000;
+const HISTORY_LIMIT=600;
 const POLICY="TOP3=폭발 전 선행후보. 최신 스캔 하나의 1~3위에 갇히지 않고 최근 30분 후보군의 종목별 최신 상태를 재검증해 후행·과열·20분 미재등장을 제거한 뒤 선행점수 상위 3개를 표시. SCOUT도 관찰구간은 표시하되 실제 ENTRY는 해당 종목 행 자체가 ENTRY+entry_allowed=true일 때만 허용.";
 
 function latestByMarket(rows){
@@ -23,6 +23,27 @@ function latestByMarket(rows){
     seen.add(market);out.push(row);
   }
   return out;
+}
+
+function historyByMarket(rows,now=Date.now()){
+  const grouped=new Map();
+  for(const raw of Array.isArray(rows)?rows:[]){
+    const market=String(raw?.market||"");if(!market)continue;
+    if(!grouped.has(market))grouped.set(market,[]);
+    grouped.get(market).push(raw);
+  }
+  const result=new Map();
+  for(const [market,items] of grouped){
+    const chronological=items.slice().sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+    const recent30=chronological.filter(x=>now-new Date(x.ts).getTime()<=30*60*1000);
+    const series=chronological.map(x=>{
+      const growth=Number(x.volume_ratio15m);
+      const at=new Date(x.ts).getTime();
+      return {offsetMin:Number.isFinite(at)?Math.max(0,(now-at)/60000):null,ratio:Number.isFinite(growth)?Math.max(0,1+growth):null};
+    }).filter(x=>x.ratio!=null);
+    result.set(market,{repeatCount:recent30.length,volumeTimeSeries:series});
+  }
+  return result;
 }
 
 function isExplicitEntry(row){
@@ -42,6 +63,7 @@ async function loadBroadRadar(){
   const pool=await db.from("gn_pre_pump_snapshots").select("*").gte("ts",historyCutoff).order("ts",{ascending:false}).order("rank",{ascending:true}).limit(HISTORY_LIMIT);
   if(pool.error)throw pool.error;
   const latestRows=latestByMarket(pool.data||[]);
+  const historyMap=historyByMarket(pool.data||[],Date.now());
   const markets=latestRows.map(x=>x.market).filter(Boolean);
   let outcomes=[],summary=[],readiness=[];
   if(markets.length){
@@ -60,13 +82,23 @@ async function loadBroadRadar(){
   const now=Date.now();
   const mapped=latestRows.map(raw=>{
     const r=mapRow(raw,outcomes,summaryMap,readinessMap);
+    const history=historyMap.get(String(raw.market||""))||{repeatCount:0,volumeTimeSeries:[]};
     const rowTs=new Date(raw.ts||0).getTime();
     const candidateAgeMin=Number.isFinite(rowTs)?Math.max(0,(now-rowTs)/60000):null;
     const scannerStatus=String(raw?.status||"").toUpperCase();
     const rawEntryAllowed=scannerStatus==="ENTRY"&&raw?.details?.entry_allowed===true;
+    const details=raw?.details&&typeof raw.details==="object"?raw.details:{};
+    const expansion=details.expansion||details.listing_expansion_evidence||{};
+    const hasExplicitPreExpansion=typeof expansion.pre_expansion_eligible==="boolean";
+    const return15m=Number(raw.return15m);
+    const lateRisk=details?.late_pump?.risk===true;
+    const fallbackPreExpansion=!hasExplicitPreExpansion&&["SCOUT","ENTRY","WATCH"].includes(scannerStatus)&&Number.isFinite(return15m)&&return15m<.04&&!lateRisk;
     return {...r,
       candidateAgeMin:candidateAgeMin==null?null:+candidateAgeMin.toFixed(1),
       scannerStatus,
+      repeatCount:Math.max(Number(r.repeatCount)||0,history.repeatCount),
+      volumeTimeSeries:r.volumeTimeSeries||history.volumeTimeSeries,
+      preExpansionEligible:r.preExpansionEligible===true||fallbackPreExpansion,
       entryAllowed:rawEntryAllowed,
       strictImmediate:rawEntryAllowed
     };
@@ -154,4 +186,4 @@ function wrappedExpress(...args){
   return app;
 }
 Object.assign(wrappedExpress,previousExpress);require.cache[expressPath].exports=wrappedExpress;
-module.exports={POLICY,enforceLeadingTop3,latestByMarket,loadBroadRadar,mergeImmediate,isExplicitEntry};
+module.exports={POLICY,enforceLeadingTop3,historyByMarket,latestByMarket,loadBroadRadar,mergeImmediate,isExplicitEntry};

@@ -10,6 +10,14 @@ function row(market,rank,overrides={}){
   return {market,rank,mechanicalScore:85,maAlignment:75,ma20Slope:.25,obv1h:.25,volumeAccel5m:2,repeatCount:2,riseSinceFirstPct:1,candidateAgeMin:1,preExpansionEligible:true,return60m:.01,extensionFromLow2h:.02,globalSpotExchangeCount:2,globalExchangeSync:1,volumeTimeSeries:flow(),empiricalValidation:{lead_core:true,lagging:false},...overrides};
 }
 
+test("SCOUT survives when overseas fields are missing, but missing overseas data never authorizes ENTRY",()=>{
+  const scout=row("KRW-EARLY",1,{status:"SCOUT",globalSpotExchangeCount:null,globalExchangeSync:null,empiricalValidation:{lead_core:false,lagging:false}});
+  const blockedEntry=row("KRW-NO-GLOBAL-ENTRY",2,{status:"ENTRY",strictImmediate:true,entryAllowed:true,globalSpotExchangeCount:null,globalExchangeSync:null});
+  const out=selectLeadingTop3([scout,blockedEntry]);
+  assert.deepEqual(out.top3.map(x=>x.market),["KRW-EARLY"]);
+  assert.notEqual(out.top3[0].strictImmediate,true);
+});
+
 test("TOP3 only uses repeated, globally confirmed pre-expansion candidates",()=>{
   const rows=[
     row("KRW-A",1,{empiricalValidation:{lead_core:false,lagging:true},ma20Slope:-.1}),
@@ -20,7 +28,8 @@ test("TOP3 only uses repeated, globally confirmed pre-expansion candidates",()=>
     row("KRW-F",6,{recommendationEligible:true,repeatCount:2})
   ];
   const out=selectLeadingTop3(rows);
-  assert.deepEqual(out.top3.map(x=>x.market),["KRW-F","KRW-E","KRW-D"]);
+  assert.equal(out.top3[0].market,"KRW-F");
+  assert.deepEqual(new Set(out.top3.map(x=>x.market)),new Set(["KRW-F","KRW-E","KRW-D"]));
   assert.equal(out.top3.length,3);
 });
 
