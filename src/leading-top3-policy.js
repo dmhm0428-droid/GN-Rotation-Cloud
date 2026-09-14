@@ -109,11 +109,14 @@ function passesTop3Gate(row){
   const globalConfirmed=count!=null&&count>=2&&sync!=null&&sync>=.55;
   const globalMissing=count==null&&sync==null;
   const strictEntry=row?.strictImmediate===true||row?.entryAllowed===true;
-  const core=row?.preExpansionEligible===true&&(lead||scannerLead)&&repeat>=2&&flow.available&&flow.score>=60;
+  const ma=num(row?.maAlignment),ma20=num(row?.ma20Slope),obv=num(row?.obv1h),accel=num(row?.volumeAccel5m);
+  const completeStructure=ma!=null&&ma>=60&&ma20!=null&&ma20>=0.10&&obv!=null&&obv>=0.10&&accel!=null&&accel>0&&accel<10;
+  const core=row?.preExpansionEligible===true&&(lead||scannerLead)&&status!=="WATCH"&&repeat>=2&&flow.available&&flow.score>=60&&completeStructure&&globalConfirmed;
   if(!core)return false;
-  // ENTRY remains fail-closed. A missing overseas confirmation can only produce SCOUT.
-  if(strictEntry)return globalConfirmed&&num(row?.validationConfidence)>=80;
-  return (globalConfirmed||globalMissing)&&num(row?.validationConfidence)>=68;
+  // A displayed TOP3 must have complete structure and overseas spot confirmation.
+  // ENTRY additionally requires the row-specific five-AI gate; a global/dashboard AI label is never enough.
+  if(strictEntry)return row?.fiveAiGateOk===true&&num(row?.validationConfidence)>=80;
+  return num(row?.validationConfidence)>=75;
 }
 
 function lagReasons(row){
