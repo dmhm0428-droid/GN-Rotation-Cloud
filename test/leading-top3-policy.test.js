@@ -10,12 +10,12 @@ function row(market,rank,overrides={}){
   return {market,rank,mechanicalScore:85,maAlignment:75,ma20Slope:.25,obv1h:.25,volumeAccel5m:2,repeatCount:2,riseSinceFirstPct:1,candidateAgeMin:1,preExpansionEligible:true,return60m:.01,extensionFromLow2h:.02,globalSpotExchangeCount:2,globalExchangeSync:1,volumeTimeSeries:flow(),empiricalValidation:{lead_core:true,lagging:false},...overrides};
 }
 
-test("SCOUT survives when overseas fields are missing, but missing overseas data never authorizes ENTRY",()=>{
+test("missing overseas fields never enter TOP3 or authorize ENTRY",()=>{
   const scout=row("KRW-EARLY",1,{status:"SCOUT",globalSpotExchangeCount:null,globalExchangeSync:null,empiricalValidation:{lead_core:false,lagging:false}});
   const blockedEntry=row("KRW-NO-GLOBAL-ENTRY",2,{status:"ENTRY",strictImmediate:true,entryAllowed:true,globalSpotExchangeCount:null,globalExchangeSync:null});
   const out=selectLeadingTop3([scout,blockedEntry]);
-  assert.deepEqual(out.top3.map(x=>x.market),["KRW-EARLY"]);
-  assert.notEqual(out.top3[0].strictImmediate,true);
+  assert.deepEqual(out.top3.map(x=>x.market),[]);
+  assert.equal(out.nearMiss.some(x=>x.market==="KRW-EARLY"),true);
 });
 
 test("TOP3 only uses repeated, globally confirmed pre-expansion candidates",()=>{
@@ -34,7 +34,7 @@ test("TOP3 only uses repeated, globally confirmed pre-expansion candidates",()=>
 });
 
 test("ENTRY is an upgrade after the same pre-expansion gate",()=>{
-  const out=selectLeadingTop3([row("KRW-SCOUT",4),row("KRW-ENTRY",8,{strictImmediate:true,entryAllowed:true})]);
+  const out=selectLeadingTop3([row("KRW-SCOUT",4),row("KRW-ENTRY",8,{strictImmediate:true,entryAllowed:true,fiveAiGateOk:true})]);
   assert.equal(out.top3[0].market,"KRW-ENTRY");
   assert.equal(stageOf(out.top3[0]),"ENTRY");
   assert.equal(out.top3.some(x=>x.market==="KRW-SCOUT"),true);
@@ -100,4 +100,21 @@ test("probability is only marked verified when backed by an explicit empirical h
   const verified=empiricalProbability(row("KRW-VERIFIED",1,{empiricalHitRate24h:68,empiricalSampleSize:45}));
   assert.equal(verified.rate,68);
   assert.equal(verified.verified,true);
+});
+
+
+test("missing MA or OBV evidence is fail-closed even with a high scanner score",()=>{
+  const out=selectLeadingTop3([
+    row("KRW-NO-MA",1,{mechanicalScore:99,maAlignment:null,ma20Slope:null}),
+    row("KRW-NO-OBV",2,{mechanicalScore:99,obv1h:null}),
+    row("KRW-COMPLETE",3)
+  ]);
+  assert.deepEqual(out.top3.map(x=>x.market),["KRW-COMPLETE"]);
+});
+
+test("row-level ENTRY requires its own five-AI approval",()=>{
+  const pending=row("KRW-PENDING",1,{status:"ENTRY",strictImmediate:true,entryAllowed:true,fiveAiGateOk:false});
+  const approved=row("KRW-APPROVED",2,{status:"ENTRY",strictImmediate:true,entryAllowed:true,fiveAiGateOk:true});
+  const out=selectLeadingTop3([pending,approved]);
+  assert.deepEqual(out.top3.map(x=>x.market),["KRW-APPROVED"]);
 });
