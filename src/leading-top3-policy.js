@@ -40,6 +40,14 @@ function volumeTimeSeries(row){
 function timeFlowSignal(row){
   const points=volumeTimeSeries(row);
   if(points.length<3)return {available:false,score:null,trend:null,positiveSteps:0,totalSteps:0,latestRatio:null,series:points};
+  const timed=points.filter(p=>p.offsetMin!=null);
+  if(timed.length){
+    const oldest=Math.max(...timed.map(p=>p.offsetMin));
+    const newest=Math.min(...timed.map(p=>p.offsetMin));
+    // A few tightly-clustered or stale persisted snapshots are not a measured
+    // T-30 -> now flow.  Treat missing coverage as unavailable (fail closed).
+    if(oldest-newest<15||newest>12)return {available:false,score:null,trend:null,positiveSteps:0,totalSteps:0,latestRatio:null,series:points};
+  }
   const ratios=points.map(p=>p.ratio);
   const first=ratios[0],latest=ratios.at(-1),prev=ratios.at(-2);
   let positiveSteps=0;for(let i=1;i<ratios.length;i++)if(ratios[i]>ratios[i-1])positiveSteps++;
@@ -82,6 +90,7 @@ function hardDiscardReasons(row){
   if(ev.lagging===true)reasons.push("후행 판정");
   if(String(row?.precursorStage||row?.details?.precursor?.confidence_stage||"").toUpperCase()==="REJECT_DECAY")reasons.push("전조 약화");
   if(eventRisk(row))reasons.push("이벤트/보안 리스크");
+  if(row?.details?.late_pump?.risk===true||row?.latePumpRisk===true)reasons.push("후행 급등/분배 위험");
   if(rise!=null&&rise<=-8)reasons.push("최초탐지 대비 -8% 이하");
   if(ma20!=null&&ma20<=-0.10&&obv!=null&&obv<0)reasons.push("가격기울기·OBV 동시 악화");
   if(pxSlope!=null&&pxSlope<0&&volSlope!=null&&volSlope<0&&repeat>=2)reasons.push("반복탐지 후 가격·거래량 기울기 동시 음전");
@@ -105,15 +114,13 @@ function passesTop3Gate(row){
   const lead=row?.empiricalValidation?.lead_core===true||row?.recommendationEligible===true;
   const flow=timeFlowSignal(row);
   const status=String(row?.scannerStatus||row?.status||"").toUpperCase();
-  const scannerLead=status==="SCOUT"||status==="ENTRY"||status==="WATCH";
   const globalConfirmed=count!=null&&count>=2&&sync!=null&&sync>=.55;
-  const globalMissing=count==null&&sync==null;
   const strictEntry=row?.strictImmediate===true||row?.entryAllowed===true;
-  const core=row?.preExpansionEligible===true&&(lead||scannerLead)&&repeat>=2&&flow.available&&flow.score>=60;
+  const core=row?.preExpansionEligible===true&&lead&&repeat>=2&&flow.available&&flow.score>=60&&globalConfirmed&&num(row?.validationConfidence)>=90;
   if(!core)return false;
-  // ENTRY remains fail-closed. A missing overseas confirmation can only produce SCOUT.
-  if(strictEntry)return globalConfirmed&&num(row?.validationConfidence)>=80;
-  return (globalConfirmed||globalMissing)&&num(row?.validationConfidence)>=68;
+  // 5AI is an execution gate, not a ranking bonus.  An ENTRY label must prove it.
+  if(strictEntry)return row?.fiveAiGateOk===true;
+  return true;
 }
 
 function lagReasons(row){
