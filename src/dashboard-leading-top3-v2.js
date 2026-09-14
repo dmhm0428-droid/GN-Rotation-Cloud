@@ -48,7 +48,7 @@ function historyByMarket(rows,now=Date.now()){
 
 function isExplicitEntry(row){
   const status=String(row?.scannerStatus||row?.status||row?.rawStatus||"").toUpperCase();
-  return status==="ENTRY"&&(row?.entryAllowed===true||row?.details?.entry_allowed===true||row?.strictImmediate===true);
+  return status==="ENTRY"&&row?.details?.five_ai_gate_ok===true&&(row?.entryAllowed===true||row?.details?.entry_allowed===true||row?.strictImmediate===true);
 }
 
 async function loadBroadRadar(){
@@ -86,7 +86,7 @@ async function loadBroadRadar(){
     const rowTs=new Date(raw.ts||0).getTime();
     const candidateAgeMin=Number.isFinite(rowTs)?Math.max(0,(now-rowTs)/60000):null;
     const scannerStatus=String(raw?.status||"").toUpperCase();
-    const rawEntryAllowed=scannerStatus==="ENTRY"&&raw?.details?.entry_allowed===true;
+    const rawEntryAllowed=scannerStatus==="ENTRY"&&raw?.details?.entry_allowed===true&&raw?.details?.five_ai_gate_ok===true;
     const details=raw?.details&&typeof raw.details==="object"?raw.details:{};
     const expansion=details.expansion||details.listing_expansion_evidence||{};
     const hasExplicitPreExpansion=typeof expansion.pre_expansion_eligible==="boolean";
