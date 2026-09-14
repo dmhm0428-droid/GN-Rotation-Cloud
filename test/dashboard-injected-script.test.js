@@ -25,6 +25,11 @@ test("single TOP3 renderer injected browser JavaScript parses",()=>{
   assert.doesNotThrow(()=>new Function(body));
 });
 
+test("policy dashboard injected browser JavaScript parses",()=>{
+  const body=injectedBody("dashboard-policy-detected-v1.js","gn-policy-detected-script-v1");
+  assert.doesNotThrow(()=>new Function(body));
+});
+
 test("authoritative domestic-stock tab shows current and both buy ranges",()=>{
   const src=fs.readFileSync(path.resolve(__dirname,"..","src","dashboard-authoritative-v1.js"),"utf8");
   assert.match(src,/\/api\/risk-buy-fx/);

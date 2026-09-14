@@ -98,7 +98,7 @@ create table if not exists public.gn_ai_analyses (
   id bigserial primary key,
   created_at timestamptz not null default now(),
   source_snapshot_ts timestamptz,
-  provider text not null check (provider in ('perplexity','xai','deepseek')),
+  provider text not null check (provider in ('perplexity','xai','deepseek','anthropic','gemini')),
   model text not null,
   status text not null check (status in ('success','disabled','skipped','error')),
   summary text,
