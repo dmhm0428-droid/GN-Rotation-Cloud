@@ -258,10 +258,10 @@ function watchlistSummary(rows){
 function snapshotRow(row,runId,ts,rank){
   const p=row.persistence||{},plan=row.entryPlan||{};
   return {
-    run_id:runId,ts,market:row.market,rank,score:row.probabilityScore??row.score,status:row.entryAllowed===true?"ENTRY":"WATCH",krw_price:row.krwPrice??null,
+    run_id:runId,ts,market:row.market,rank,score:row.probabilityScore??row.score,status:row.entryAllowed===true?"SCOUT":"WATCH",krw_price:row.krwPrice??null,
     return5m:row.return5m??null,return15m:row.return15m??null,volume_ratio15m:row.turnoverGrowth15m??null,
     details:{
-      entry_allowed:row.entryAllowed===true,top3_role:row.entryAllowed===true?"GLOBAL_FLOW_VERIFIED_INVESTMENT_CANDIDATE":"PRE_EXPANSION_WATCH",decision_reason:row.entryAllowed===true?"시간흐름+즉시진입 기계검증 통과":"상승 전 감시 · 진입 금지",
+      mechanical_entry_ready:row.entryAllowed===true,entry_allowed:false,five_ai_gate_ok:false,top3_role:row.entryAllowed===true?"IMMEDIATE_ENTRY_PENDING_5AI":"PRE_EXPANSION_WATCH",decision_reason:row.entryAllowed===true?"기계검증 통과 · 동일 스냅샷 5AI 5/5 승인 전 진입 금지":"상승 전 감시 · 진입 금지",
       trade_plan:{entry_price:plan.entryPrice,entry_low:plan.entryLow,entry_high:plan.entryHigh,spread_pct:plan.spreadPct},
       first_detected_at:p.firstDetectedAt,first_detected_price:p.firstDetectedPrice,
       lead_lag:{probability_score:row.probabilityScore,lag_risk_score:row.lagRiskScore,repeat_count:p.repeatCount,scanner_score:row.score,time_flow_score:p.timeFlowScore??null,time_flow_available:p.timeFlowAvailable===true,time_flow_series:p.timeFlowSeries||[],rule:"T-120~NOW 거래량 시간흐름 + ENTRY>=76 + 반복>=2 + OBV + HTF + 오더북 + 해외현물 + 파생 + 후행과열배제"},
@@ -272,7 +272,7 @@ function snapshotRow(row,runId,ts,rank){
       orderbook:{available:row.orderbookAvailable===true,signal:row.orderbookSignal??"UNKNOWN",entry_blocked:row.orderbookEntryBlocked??false,bid_imbalance:row.orderbookBidImbalance??null,ask_wall_depletion:row.orderbookAskWallDepletion??null,best_bid:row.orderbookBestBid??null,best_ask:row.orderbookBestAsk??null},
       daily_ignition:{score:row.dailyIgnitionScore??null,stage:row.dailyIgnitionStage??null,accumulation_score:row.accumulationPersistenceScore??null,obv_direction:row.dailyObvDirection??null},
       late_pump:{risk:row.latePumpRisk??false,penalty:row.latePumpPenalty??0,reasons:row.latePumpReasons||[]},
-      empirical_validation:{mechanical_score:row.probabilityScore,lead_core:row.preExpansionEligible===true&&row.globalSpotOk===true&&p.timeFlowAvailable===true,lagging:row.preExpansionEligible!==true,recommendation_eligible:row.entryAllowed===true,repeat:p.repeatCount,time_flow_score:p.timeFlowScore??null,rule:"PRE_EXPANSION_TIME_FLOW_V4"}
+      empirical_validation:{mechanical_score:row.probabilityScore,lead_core:row.preExpansionEligible===true&&row.globalSpotOk===true&&p.timeFlowAvailable===true,lagging:row.preExpansionEligible!==true,recommendation_eligible:false,mechanical_ready:row.entryAllowed===true,repeat:p.repeatCount,time_flow_score:p.timeFlowScore??null,rule:"PRE_EXPANSION_TIME_FLOW_V5_5AI_FAIL_CLOSED"}
     }
   };
 }
