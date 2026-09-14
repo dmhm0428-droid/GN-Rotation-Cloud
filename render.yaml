@@ -52,8 +52,8 @@ services:
     region: singapore
     autoDeployTrigger: commit
     buildCommand: npm install --omit=dev
-    startCommand: npm run ai:analyze
-    schedule: "*/5 * * * *"
+    startCommand: npm run ai:cycle
+    schedule: "0 * * * *"
     envVars:
       - key: SUPABASE_URL
         sync: false

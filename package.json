@@ -8,6 +8,7 @@
   },
   "scripts": {
     "ai:analyze": "node src/ai-entry-runner.js",
+    "ai:cycle": "node src/ai-cycle-runner.js",
     "collector": "node src/collector.js",
     "pre-pump": "node src/immediate-entry-runner.js",
     "start": "node src/start.js",

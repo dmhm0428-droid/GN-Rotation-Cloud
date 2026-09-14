@@ -20,6 +20,8 @@ jobs:
       - run: node --check src/dashboard-big-picture-v1.js
       - run: node --check src/dashboard-rotation-v1.js
       - run: node --check src/dashboard-ai-status-v1.js
+      - run: node --check src/dashboard-policy-detected-v1.js
+      - run: node --check src/policy-ai-runner.js
       - run: node --check src/dashboard-etf-api-v1.js
       - run: node --check src/precursor-dashboard.js
       - run: node --check src/dashboard-precursor-top3-v1.js
@@ -33,6 +35,7 @@ jobs:
       - run: node --check src/dashboard-leading-top3-v2.js
       - run: node --test test/dashboard-resilience.test.js test/dashboard-injected-script.test.js
       - run: node --test test/immediate-entry-engine.test.js test/leading-top3-policy.test.js
+      - run: node --test test/policy-ai-runner.test.js
       - name: Verify Render build configuration
         run: |
           grep -q 'buildCommand: npm install --omit=dev' render.yaml

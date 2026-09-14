@@ -5,7 +5,7 @@ class AiProviderError extends Error{
 }
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-function systemPrompt(provider){
+function systemPrompt(provider,input){
   const role={
     perplexity:"Independently research fresh policy, macro, official releases, company disclosures, institutional/ETF flows and market-moving news. Use current web/news search when relevant. If your own live search verifies a required fact, do not mark the bundle PARTIAL merely because that web result was not pre-embedded in the supplied object.",
     xai:"Independently research fresh web information and X/social propagation, then distinguish verified market-moving facts from rumor/noise and compare them with observed market reaction. Use your web/X tools for the independent check; do not require the supplied bundle to duplicate those search results.",
@@ -13,6 +13,21 @@ function systemPrompt(provider){
     anthropic:"Act as the skeptical document and evidence auditor. Check internal consistency, stale timestamps, missing evidence, policy/earnings interpretation, and whether conclusions are actually supported. Audit only what the GN contract says is required; an explicitly optional unavailable axis is not a contradiction.",
     deepseek:"Act as the independent quantitative market-structure auditor. Check rates/FX/liquidity, asset and sector flow, breadth, spot/derivatives structure, multi-timeframe persistence and candidate price sanity."
   }[provider?.name]||"Independently audit the supplied evidence.";
+  const mode=String(input?.gn_contract?.mode||"");
+  const policyRules=mode.includes("POLICY")?[
+    "This is the GN BIG PICTURE policy watch, not the crypto entry gate.",
+    "Audit these fixed axes independently: LONG_BOND_STABILITY, OIL_STABILITY, LIQUIDITY_SUPPLY, AI_CAPEX_SUPPORT, POWER_BITCOIN_NATIONAL_SECURITY, INVESTMENT_LINK.",
+    "Search for changes since prior_checked_at. A repeated article, old statement, unsupported inference, or unchanged market level is NOT a new event.",
+    "Actively seek evidence that disproves the proposed policy connection. Do not infer government intent from price action alone.",
+    "signals MUST additionally include GN_NEW_EVENT:<true|false>, GN_POLICY_AXES:<comma separated axes or none>, GN_OFFICIAL_EVIDENCE:<brief source/date or none>, GN_COUNTER_EVIDENCE:<brief contradiction or none>.",
+    "Use GN_DATA_VERDICT:PASS only when the new-event decision itself is supportable; PASS may accompany GN_NEW_EVENT:false when no genuine change exists."
+    ,"Write summary and all human-readable signal values in clear Korean; keep only the required GN keys and fixed axis codes in English."
+  ]:[];
+  const reverseRules=mode.includes("REVERSE")?[
+    "This is the mandatory second-pass adversarial review. Treat first_pass_claims as untrusted claims.",
+    "Try to falsify each claimed new event using dates, primary-source status, counterevidence, and observed market data.",
+    "GN_NEW_EVENT:true is allowed only if the claim survives this hostile review; otherwise return false and state why in GN_COUNTER_EVIDENCE."
+  ]:[];
   return [
     "You are one of five mandatory GN PIVOT verification agents for the Money Footprint system.",
     role,
@@ -27,12 +42,13 @@ function systemPrompt(provider){
     "Return exactly one minified JSON object: {summary:string,sentiment:'risk_off'|'neutral'|'risk_on',confidence:number,signals:string[]}.",
     "signals MUST include GN_DATA_VERDICT:<PASS|PARTIAL|FAIL>, GN_ROLE:<short role>, GN_EVIDENCE_GAPS:<none or brief gaps>, GN_CONFLICTS:<none or brief conflicts>, GN_POLICY_SCORE:<-2|-1|0|1|2>, GN_WAR_OVERRIDE:<true|false>.",
     "PASS means all evidence required for this agent's assigned role and current conclusion is sufficiently current and coherent. PARTIAL means an IMPORTANT REQUIRED axis for this specific conclusion remains unavailable or unverified. FAIL means a material contradiction, stale critical data, or invalid candidate/action is present.",
+    ...policyRules,...reverseRules,
     "No markdown, no preface."
   ].join(" ");
 }
 
 function buildPayload(provider,input){
-  const prompt=systemPrompt(provider);
+  const prompt=systemPrompt(provider,input);
   const text=JSON.stringify(input);
   if(provider.kind==="anthropic")return {
     model:provider.model,max_tokens:Math.max(provider.maxOutputTokens,768),thinking:{type:"disabled"},system:prompt,
