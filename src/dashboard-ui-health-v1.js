@@ -19,6 +19,7 @@ const FORBIDDEN=[
   "dashboard-activation-hotfix.js"
 ];
 const REVISION="GN_UI_CANONICAL_20260905_V3";
+const TOP3_SAFETY_REVISION="TOP3_5AI_FAIL_CLOSED_20260914_V1";
 
 function uiHealth(req,res){
   const opts=String(process.env.NODE_OPTIONS||"");
@@ -33,7 +34,7 @@ function uiHealth(req,res){
   for(const name of FORBIDDEN)forbidden[name]={preloaded:opts.includes(name)};
   const ok=Object.values(checks).every(x=>x.preloaded&&x.file)&&Object.values(forbidden).every(x=>!x.preloaded);
   res.set("Cache-Control","no-store");
-  return res.status(ok?200:503).json({ok,revision:REVISION,canonicalTop3Owner:"dashboard-leading-top3-v2",canonicalDashboardOwner:"dashboard-authoritative-v1",partialLoaderDisabled:true,checks,forbidden,time:new Date().toISOString()});
+  return res.status(ok?200:503).json({ok,revision:REVISION,top3SafetyRevision:TOP3_SAFETY_REVISION,canonicalTop3Owner:"dashboard-leading-top3-v2",canonicalDashboardOwner:"dashboard-authoritative-v1",partialLoaderDisabled:true,checks,forbidden,time:new Date().toISOString()});
 }
 
 function wrappedExpress(...args){
