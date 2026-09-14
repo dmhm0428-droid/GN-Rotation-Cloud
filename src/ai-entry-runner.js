@@ -24,7 +24,7 @@ async function latestImmediateCrypto(db){
   const run=(runs||[]).find(r=>acceptedSources.has(String(r?.source_status?.source||"")))||null;
   if(!run?.id)return {ts:null,rows:[]};
   const {data}=await db.from("gn_pre_pump_snapshots").select("*").eq("run_id",run.id).order("rank",{ascending:true}).limit(3);
-  const rows=(data||[]).filter(row=>Number(row.rank)>=1&&Number(row.rank)<=3&&["SCOUT","ENTRY"].includes(String(row.status))&&row?.details?.mechanical_entry_ready===true&&Number(row.score)>=78);
+  const rows=(data||[]).filter(row=>Number(row.rank)>=1&&Number(row.rank)<=3&&["SCOUT","ENTRY"].includes(String(row.status))&&row?.details?.mechanical_entry_ready===true&&row?.details?.five_ai_gate_ok!==true&&Number(row.score)>=78);
   return {ts:run.started_at,runId:run.id,source:String(run?.source_status?.source||""),rows};
 }
 async function alreadyAudited(db,sourceTs){
