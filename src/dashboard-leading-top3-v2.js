@@ -11,9 +11,9 @@ const {selectLeadingTop3}=require("./leading-top3-policy");
 const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
 
 const FRESH_MS=12*60*1000;
-const HISTORY_MS=130*60*1000;
+const HISTORY_MS=35*60*1000;
 const HISTORY_LIMIT=600;
-const POLICY="TOP3=폭발 전 선행후보. 최신 스캔 하나의 1~3위에 갇히지 않고 최근 30분 후보군의 종목별 최신 상태를 재검증해 후행·과열·20분 미재등장을 제거한 뒤 선행점수 상위 3개를 표시. SCOUT도 관찰구간은 표시하되 실제 ENTRY는 해당 종목 행 자체가 ENTRY+entry_allowed=true일 때만 허용.";
+const POLICY="TOP3=폭발 전 선행후보. 명시적 확장 전 판정 + 30분 내 반복 + T-30~현재 수급 + 해외현물 2곳 동시성 + 검증신뢰 90 이상만 표시. 데이터 누락은 통과가 아니라 공란. ENTRY는 해당 종목의 5AI 5/5까지 확인될 때만 허용.";
 
 function latestByMarket(rows){
   const seen=new Set(),out=[];
@@ -35,8 +35,8 @@ function historyByMarket(rows,now=Date.now()){
   const result=new Map();
   for(const [market,items] of grouped){
     const chronological=items.slice().sort((a,b)=>new Date(a.ts)-new Date(b.ts));
-    const recent30=chronological.filter(x=>now-new Date(x.ts).getTime()<=30*60*1000);
-    const series=chronological.map(x=>{
+    const recent30=chronological.filter(x=>{const age=now-new Date(x.ts).getTime();return age>=0&&age<=30*60*1000;});
+    const series=recent30.map(x=>{
       const growth=Number(x.volume_ratio15m);
       const at=new Date(x.ts).getTime();
       return {offsetMin:Number.isFinite(at)?Math.max(0,(now-at)/60000):null,ratio:Number.isFinite(growth)?Math.max(0,1+growth):null};
@@ -48,7 +48,8 @@ function historyByMarket(rows,now=Date.now()){
 
 function isExplicitEntry(row){
   const status=String(row?.scannerStatus||row?.status||row?.rawStatus||"").toUpperCase();
-  return status==="ENTRY"&&(row?.entryAllowed===true||row?.details?.entry_allowed===true||row?.strictImmediate===true);
+  const fiveAi=row?.fiveAiGateOk===true||row?.details?.five_ai_gate_ok===true;
+  return status==="ENTRY"&&fiveAi&&(row?.entryAllowed===true||row?.details?.entry_allowed===true||row?.strictImmediate===true);
 }
 
 async function loadBroadRadar(){
@@ -87,18 +88,12 @@ async function loadBroadRadar(){
     const candidateAgeMin=Number.isFinite(rowTs)?Math.max(0,(now-rowTs)/60000):null;
     const scannerStatus=String(raw?.status||"").toUpperCase();
     const rawEntryAllowed=scannerStatus==="ENTRY"&&raw?.details?.entry_allowed===true;
-    const details=raw?.details&&typeof raw.details==="object"?raw.details:{};
-    const expansion=details.expansion||details.listing_expansion_evidence||{};
-    const hasExplicitPreExpansion=typeof expansion.pre_expansion_eligible==="boolean";
-    const return15m=Number(raw.return15m);
-    const lateRisk=details?.late_pump?.risk===true;
-    const fallbackPreExpansion=!hasExplicitPreExpansion&&["SCOUT","ENTRY","WATCH"].includes(scannerStatus)&&Number.isFinite(return15m)&&return15m<.04&&!lateRisk;
     return {...r,
       candidateAgeMin:candidateAgeMin==null?null:+candidateAgeMin.toFixed(1),
       scannerStatus,
       repeatCount:Math.max(Number(r.repeatCount)||0,history.repeatCount),
-      volumeTimeSeries:r.volumeTimeSeries||history.volumeTimeSeries,
-      preExpansionEligible:r.preExpansionEligible===true||fallbackPreExpansion,
+      volumeTimeSeries:Array.isArray(r.volumeTimeSeries)&&r.volumeTimeSeries.length?r.volumeTimeSeries:history.volumeTimeSeries,
+      preExpansionEligible:r.preExpansionEligible===true,
       entryAllowed:rawEntryAllowed,
       strictImmediate:rawEntryAllowed
     };
@@ -148,7 +143,7 @@ async function enforceLeadingTop3(body){
       cryptoTop3PoolSize:leading.poolSize||0
     };
   }catch(error){
-    return {...body,cryptoTop3Policy:POLICY,cryptoTop3V2Error:String(error?.message||error)};
+    return {...body,cryptoRadar:[],cryptoNearMiss:[],precursorStale:true,cryptoTop3Policy:POLICY,cryptoTop3V2Error:String(error?.message||error)};
   }
 }
 
