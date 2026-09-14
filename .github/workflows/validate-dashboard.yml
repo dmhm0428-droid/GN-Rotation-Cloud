@@ -100,8 +100,7 @@ jobs:
       RENDER_PUBLIC_URL: ${{ vars.RENDER_PUBLIC_URL }}
     steps:
       - uses: actions/checkout@v4
-      - name: Probe live Render canonical UI chain without blocking deploy
-        continue-on-error: true
+      - name: Verify live Render serves the TOP3 safety revision
         shell: bash
         run: |
           set -euo pipefail
