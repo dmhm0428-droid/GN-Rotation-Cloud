@@ -30,6 +30,17 @@ test("policy dashboard injected browser JavaScript parses",()=>{
   assert.doesNotThrow(()=>new Function(body));
 });
 
+test("policy dashboard always renders six fixed headings and hides legacy scorecard",()=>{
+  const policy=fs.readFileSync(path.resolve(__dirname,"..","src","dashboard-policy-detected-v1.js"),"utf8");
+  const authoritative=fs.readFileSync(path.resolve(__dirname,"..","src","dashboard-authoritative-v1.js"),"utf8");
+  for(const label of ["장기채 안정","유가 안정","유동성 공급","AI 기업 투자속도·정부지원","전력·비트코인 채굴·국가안보","투자 연결"]){
+    assert.match(policy,new RegExp(label));
+  }
+  assert.match(policy,/STATIC_ROWS/);
+  assert.match(policy,/render\(null\);try/);
+  assert.match(authoritative,/id="legacyPolicyEarlyWarning" style="display:none"/);
+});
+
 test("authoritative domestic-stock tab shows current and both buy ranges",()=>{
   const src=fs.readFileSync(path.resolve(__dirname,"..","src","dashboard-authoritative-v1.js"),"utf8");
   assert.match(src,/\/api\/risk-buy-fx/);
