@@ -48,22 +48,91 @@ app.get("/api/portfolio",async(req,res)=>{try{res.json(await loadPortfolio());}c
 app.get("/api/runs",async(req,res)=>{const {data,error}=await db.from("gn_runs").select("*").order("started_at",{ascending:false}).limit(30);if(error)return res.status(500).json({error:error.message});res.json(data);});
 app.get("/api/pre-pump/latest",createLatestPrePumpHandler({db}));
 
+const FOCUS_UNIVERSE={
+  us:[
+    {symbol:"IREN",name:"IREN",theme:"AI 데이터센터·크립토 인프라",description:"대규모 전력 기반 데이터센터를 운영하며 비트코인 채굴과 AI 클라우드 인프라를 병행"},
+    {symbol:"AVGO",name:"Broadcom",theme:"반도체·AI 네트워킹",description:"AI 가속기 연결용 네트워크·커스텀 반도체와 인프라 소프트웨어를 공급"},
+    {symbol:"VRT",name:"Vertiv",theme:"AI 전력·냉각",description:"데이터센터용 전력관리·UPS·열관리와 냉각 인프라를 공급"},
+    {symbol:"MNDY",name:"monday.com",theme:"AI 소프트웨어",description:"기업용 업무관리·워크플로 자동화 소프트웨어를 제공"}
+  ],
+  kr:[
+    {symbol:"000660.KS",ticker:"000660",name:"SK하이닉스",theme:"AI 메모리·HBM",description:"AI 가속기에 쓰이는 HBM과 DRAM·NAND를 생산"},
+    {symbol:"267260.KS",ticker:"267260",name:"HD현대일렉트릭",theme:"전력망·변압기",description:"변압기·차단기 등 초고압 전력기기를 생산"},
+    {symbol:"010120.KS",ticker:"010120",name:"LS ELECTRIC",theme:"전력망·스마트그리드",description:"배전·자동화·스마트그리드와 전력기기를 공급"}
+  ],
+  safe:[
+    {symbol:"GLD",name:"SPDR Gold Shares",theme:"금·안전자산",description:"금 현물 가격을 추종하는 대형 금 ETF"},
+    {symbol:"IAU",name:"iShares Gold Trust",theme:"금·안전자산",description:"금 현물 가격을 추종하는 금 ETF"}
+  ]
+};
+let focusCache={at:0,data:null};
+async function yahooDaily(symbol){
+  const ac=new AbortController();const timer=setTimeout(()=>ac.abort(),8000);
+  try{
+    const url="https://query1.finance.yahoo.com/v8/finance/chart/"+encodeURIComponent(symbol)+"?range=1mo&interval=1d";
+    const r=await fetch(url,{signal:ac.signal,headers:{"User-Agent":"Mozilla/5.0","accept":"application/json"}});
+    if(!r.ok)throw new Error("Yahoo "+r.status);
+    const j=await r.json();const x=j?.chart?.result?.[0];if(!x)throw new Error("Yahoo empty");
+    const q=x.indicators?.quote?.[0]||{};const closes=q.close||[],volumes=q.volume||[];
+    const rows=closes.map((c,i)=>({c:Number(c),v:Number(volumes[i])})).filter(z=>Number.isFinite(z.c)&&z.c>0);
+    if(rows.length<3)throw new Error("insufficient daily rows");
+    return rows;
+  }finally{clearTimeout(timer);}
+}
+function focusSummary(meta,rows){
+  const last=rows.at(-1),prev=rows.at(-2),prev5=rows[Math.max(0,rows.length-6)];
+  const r1=prev?.c?last.c/prev.c-1:null,r5=prev5?.c?last.c/prev5.c-1:null;
+  const hist=rows.slice(Math.max(0,rows.length-6),-1).map(x=>x.v).filter(Number.isFinite);
+  const avgV=hist.length?hist.reduce((a,b)=>a+b,0)/hist.length:null;
+  const volRatio=avgV&&Number.isFinite(last.v)?last.v/avgV:null;
+  const score=(r5??0)*100*0.55+(r1??0)*100*0.30+((volRatio??1)-1)*8;
+  let flow="중립",flowClass="warn";
+  if((r5??0)>0.02&&(volRatio??1)>=1.05){flow="가격·거래량 유입 강화";flowClass="good";}
+  else if((r5??0)<-0.02&&(volRatio??1)>=1.05){flow="가격·거래량 이탈 우세";flowClass="bad";}
+  return {...meta,price:last.c,r1,r5,volumeRatio:volRatio,score:+score.toFixed(3),flow,flowClass};
+}
+async function focusGroup(items){
+  const settled=await Promise.all(items.map(async meta=>{try{return focusSummary(meta,await yahooDaily(meta.symbol));}catch(error){return {...meta,error:String(error.message||error)};}}));
+  const valid=settled.filter(x=>Number.isFinite(x.score)).sort((a,b)=>b.score-a.score);
+  return {winner:valid[0]||null,all:settled};
+}
+app.get("/api/focus-candidates",async(req,res)=>{
+  try{
+    if(focusCache.data&&Date.now()-focusCache.at<5*60*1000)return res.json(focusCache.data);
+    const [us,kr,safeGroup]=await Promise.all([focusGroup(FOCUS_UNIVERSE.us),focusGroup(FOCUS_UNIVERSE.kr),focusGroup(FOCUS_UNIVERSE.safe)]);
+    const data={ts:new Date().toISOString(),method:"최근 1일·5일 가격과 최근 거래량을 합친 흐름 프록시",us,kr,safe:safeGroup};
+    focusCache={at:Date.now(),data};res.json(data);
+  }catch(e){res.status(500).json({error:String(e.message||e)});}
+});
+
 app.get("/",(req,res)=>res.type("html").send(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>GN PIVOT · 투자비서</title><style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#080a0d;color:#eef2f6;font-family:system-ui,-apple-system,sans-serif}.wrap{max-width:820px;margin:auto;padding:14px 14px 50px}.top{display:flex;justify-content:space-between;gap:10px;align-items:center}.title{font-size:22px;font-weight:950}.muted{color:#8996a3;font-size:12px}.topActions{display:flex;gap:7px}.topActions button,.logout{background:#171d24;border:1px solid #303b47;color:#dce4ec;border-radius:9px;padding:8px 10px;font-size:12px;text-decoration:none}.hero{margin-top:12px;background:#11161c;border:1px solid #34404c;border-radius:18px;padding:17px}.heroTop{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.eyebrow{font-size:11px;color:#8996a3;font-weight:800}.direction{font-size:26px;font-weight:950;line-height:1.15;margin-top:3px}.action{font-size:17px;font-weight:900;margin-top:7px}.good{color:#5ada91}.warn{color:#ffd166}.bad{color:#ff7272}.neutral{color:#b7c1cb}.score{font-size:12px;color:#a8b4c0;text-align:right}.thesis{margin-top:12px;padding-top:11px;border-top:1px solid #27313b;font-size:13px;line-height:1.55;color:#c3ccd5}.section{margin-top:18px}.sectionTitle{display:flex;justify-content:space-between;align-items:end;margin:0 2px 8px}.sectionTitle b{font-size:15px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.card{background:#11161c;border:1px solid #27313b;border-radius:14px;padding:13px}.cardName{font-size:12px;color:#9eabb7;font-weight:800}.cardAction{font-size:18px;font-weight:950;margin-top:5px}.cardMeta{font-size:11px;color:#7f8c98;margin-top:5px;line-height:1.4}.assetGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.asset{display:flex;justify-content:space-between;gap:10px;align-items:center;background:#11161c;border:1px solid #27313b;border-radius:14px;padding:12px}.assetName{font-weight:900}.assetSub{font-size:11px;color:#84919d;margin-top:3px}.assetAct{font-size:13px;font-weight:900;text-align:right}.top3{display:grid;gap:8px}.pick{display:grid;grid-template-columns:32px 1fr auto;gap:10px;align-items:start;background:#11161c;border:1px solid #27313b;border-radius:14px;padding:12px}.rank{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#202833;font-weight:900}.pickName{font-size:16px;font-weight:950}.pickMeta{font-size:11px;color:#8f9ca8;line-height:1.45;margin-top:3px}.stage{display:inline-block;padding:3px 7px;border:1px solid #3b4856;border-radius:999px;font-size:10px;margin-top:6px}.pickAct{font-size:14px;font-weight:950;text-align:right}.empty{background:#11161c;border:1px solid #27313b;border-radius:14px;padding:14px;color:#8e9aa6}.foot{margin-top:20px;color:#66727d;text-align:center;font-size:10px}@media(max-width:620px){.cards{grid-template-columns:1fr}.assetGrid{grid-template-columns:1fr}.direction{font-size:24px}.pick{grid-template-columns:30px 1fr}.pickAct{grid-column:2;text-align:left}.heroTop{display:block}.score{text-align:left;margin-top:8px}}
 </style></head><body><div class="wrap"><div class="top"><div><div class="title">GN PIVOT</div><div class="muted" id="updated">불러오는 중…</div></div><div class="topActions"><button onclick="loadAll()">새로고침</button><a class="logout" href="/logout">로그아웃</a></div></div><div class="hero" id="hero"></div>
-<div class="section"><div class="sectionTitle"><b>오늘 행동 · 3개만 본다</b><span class="muted">시장 → 내 자산 → 후보</span></div><div class="cards" id="actions"></div></div>
-<div class="section"><div class="sectionTitle"><b>내 자산</b><span class="muted">주식 · 코인 · 퇴직연금</span></div><div class="assetGrid" id="assets"></div></div>
-<div class="section"><div class="sectionTitle"><b>돈의 발자국</b><span class="muted">결과가 아니라 선행 방향</span></div><div class="cards" id="footprints"></div></div>
+<div class="section"><div class="sectionTitle"><b>오늘 판단</b><span class="muted">시장 → 자금 → 후보</span></div><div class="cards" id="actions"></div></div>
+<div class="section"><div class="sectionTitle"><b>자산군별 집중 후보 · 각 1개</b><span class="muted">미국주식 · 한국주식 · 크립토 · 금/안전자산</span></div><div class="assetGrid" id="focus"></div></div>
+<div class="section"><div class="sectionTitle"><b>핵심 크립토 추적</b><span class="muted">BTC · ETH 실시간 엔진</span></div><div class="assetGrid" id="assets"></div></div>
+<div class="section"><div class="sectionTitle"><b>돈의 발자국</b><span class="muted">장기채 · 유가/디젤 · 유동성 · 달러/환율 변화와 연결</span></div><div class="cards" id="footprints"></div></div>
 <div class="section"><div class="sectionTitle"><b>Pre-Pump TOP3</b><span class="muted">원본 ENTRY/관리 상태</span></div><div class="top3" id="top3"></div></div>
-<div class="foot">후보가 없으면 비워둔다 · 강제 TOP3 금지 · 추격보다 선행탐지 우선</div></div><script>
+<div class="foot">자산군별 1개 · 후보가 없으면 비워둔다 · 강제 TOP3 금지 · 추격보다 선행탐지 우선</div></div><script>
 const f=x=>Number.isFinite(Number(x))?Number(x).toFixed(1):'-';const n=x=>x==null?'':Number(x).toLocaleString();
 async function safe(url){const r=await fetch(url);if(r.status===401){location.href='/login';throw new Error('로그인이 필요합니다');}if(!r.ok)throw new Error(await r.text());return r.json();}
 function clsFromAction(raw,score){const s=String(raw||'').toUpperCase();if(s.includes('매수금지')||s.includes('NO_CHASE')||s.includes('SELL')||s.includes('EXIT')||s.includes('청산')||s.includes('물타기금지'))return'bad';if(s.includes('추가매수')||s.includes('확인매수')||s.includes('ENTRY')||s.includes('BUY')||s.includes('진입')||s.includes('익절')||s.includes('러너유지'))return'good';const v=Number(score);if(Number.isFinite(v)&&v<35)return'bad';if(Number.isFinite(v)&&v>=65)return'good';return'warn';}
 function direction(d){const s=Number(d?.score)||50;if(s<35)return['위험 회피 우세','현금 우선 · 신규매수 중단','bad'];if(s<50)return['조정 우세','추격 금지 · 현금 유지','warn'];if(s<65)return['중립 / 방향 탐색','선발대만 · 확인 후 확대','warn'];return['위험선호 우세','분할매수 가능 · 과열 추격 금지','good'];}
-function hero(m){const d=m?.decision||{};const [dir,act,cl]=direction(d);const ai=d?.aiApplied?'AI 합의 반영':'시장 데이터 기준';return '<div class="heroTop"><div><div class="eyebrow">2~6주 기본 방향</div><div class="direction '+cl+'">'+dir+'</div><div class="action">'+act+'</div></div><div class="score">시장점수 '+f(d.score)+'<br>'+ai+'</div></div><div class="thesis">기본 시나리오: 9월 중하순 흔들림 가능성은 열어두되 구조적 약세로 단정하지 않는다. 급등 추격보다 조정에서 분할매수 준비. 방향은 가격이 빠진 뒤가 아니라 유동성·금리·현물자금의 선행 변화가 무너질 때만 수정.</div>';}
+function hero(m){const d=m?.decision||{};const [dir,act,cl]=direction(d);const ai=d?.aiApplied?'AI 합의 반영':'시장 데이터 기준';return '<div class="heroTop"><div><div class="eyebrow">2~6주 기본 방향</div><div class="direction '+cl+'">'+dir+'</div><div class="action">'+act+'</div></div><div class="score">시장점수 '+f(d.score)+'<br>'+ai+'</div></div><div class="thesis">운용 원금 20,000,000원 · 자산군별 후보는 각각 1개만 표시. 고정 배분은 하지 않고, 장기채·유가/디젤·유동성·달러/환율과 실제 가격·거래량 흐름이 확인될 때만 분할 투입. 가격이 흔들렸다는 이유만으로 사전 시나리오를 뒤집지 않는다.</div>';}
 function actionCards(m){const d=m?.decision||{};const [dir,act,cl]=direction(d);return '<div class="card"><div class="cardName">시장</div><div class="cardAction '+cl+'">'+dir+'</div><div class="cardMeta">'+act+'</div></div><div class="card"><div class="cardName">신규자금</div><div class="cardAction '+(cl==='good'?'good':'warn')+'">'+(cl==='good'?'1차 분할':'현금 유지')+'</div><div class="cardMeta">전액 투입 금지 · 다음 조정 여력 남김</div></div><div class="card"><div class="cardName">멘탈 기준</div><div class="cardAction neutral">추격 안 함</div><div class="cardMeta">오르면 놓친 게 아니라 계획대로 대기</div></div>';}
-function assets(latest,m){const by={};for(const r of latest||[])by[String(r.coin||'').toUpperCase()]=r;const d=m?.decision||{};const [dir,act,cl]=direction(d);function row(name,sub,text,c){return '<div class="asset"><div><div class="assetName">'+name+'</div><div class="assetSub">'+sub+'</div></div><div class="assetAct '+c+'">'+text+'</div></div>';}
-const btc=by.BTC,eth=by.ETH;return row('IREN · MNDY · 하이닉스','AI/반도체 핵심 추적','조정시 분할',cl==='bad'?'warn':'good')+row('퇴직연금','장기자금 · 화면 복구','1차 분할 대기',cl==='bad'?'warn':'good')+row('BTC',btc?.krw_price!=null?n(btc.krw_price)+'원':'가격 확인 중',clsFromAction(btc?.stage,btc?.score)==='good'?'보유/분할':'대기',clsFromAction(btc?.stage,btc?.score))+row('ETH',eth?.krw_price!=null?n(eth.krw_price)+'원':'가격 확인 중',clsFromAction(eth?.stage,eth?.score)==='good'?'보유/분할':'대기',clsFromAction(eth?.stage,eth?.score));}
+function assets(latest,m){const by={};for(const r of latest||[])by[String(r.coin||'').toUpperCase()]=r;function row(name,sub,text,c){return '<div class="asset"><div><div class="assetName">'+name+'</div><div class="assetSub">'+sub+'</div></div><div class="assetAct '+c+'">'+text+'</div></div>';}
+const btc=by.BTC,eth=by.ETH;return row('BTC',btc?.krw_price!=null?n(btc.krw_price)+'원':'가격 확인 중',clsFromAction(btc?.stage,btc?.score)==='good'?'구조 유지':'대기',clsFromAction(btc?.stage,btc?.score))+row('ETH',eth?.krw_price!=null?n(eth.krw_price)+'원':'가격 확인 중',clsFromAction(eth?.stage,eth?.score)==='good'?'구조 유지':'대기',clsFromAction(eth?.stage,eth?.score));}
+function pctText(x){return Number.isFinite(Number(x))?(Number(x)*100).toFixed(1)+'%':'-';}
+function priceText(x,currency){if(!Number.isFinite(Number(x)))return'-';return currency==='KRW'?Math.round(Number(x)).toLocaleString()+'원':'const d=m?.decision||{};const reasons=d.reasons||[];const ai=m?.ai;const aiTxt=ai?.eligible?(ai.sentiment==='risk_on'?'위험선호':ai.sentiment==='risk_off'?'위험회피':'중립'):'표본부족';return '<div class="card"><div class="cardName">유동성/시장폭</div><div class="cardAction '+clsFromAction(d.action,d.score)+'">'+(d.regime||'확인 중')+'</div><div class="cardMeta">시장점수 '+f(d.score)+'</div></div><div class="card"><div class="cardName">AI 5개 합의</div><div class="cardAction neutral">'+aiTxt+'</div><div class="cardMeta">'+(ai?.successCount||0)+'/5 · 신뢰도 '+(ai?.confidence!=null?Math.round(ai.confidence*100)+'%':'-')+'</div></div><div class="card"><div class="cardName">현재 핵심 근거</div><div class="cardAction neutral">'+(reasons[0]?'유지':'관찰')+'</div><div class="cardMeta">'+(reasons[0]||'새 선행 변화 없음')+'</div></div>';}
+function top3Cards(rows){const top=(rows||[]).slice(0,3);if(!top.length)return '<div class="empty">현재 유효 후보 없음 — 억지로 3개를 채우지 않음</div>';return top.map((r,i)=>{const name=String(r.market||r.coin||'').replace('KRW-','');const action=String(r.action||'관찰');const status=String(r.status||r.scannerStatus||'');const c=clsFromAction(action,r.score);return '<div class="pick"><div class="rank">'+(r.rank||i+1)+'</div><div><div class="pickName">'+name+'</div><div class="pickMeta">현재 '+(r.krwPrice!=null?n(r.krwPrice)+'원':'-')+' · 최초/진입 '+(r.recommendedEntry!=null?n(r.recommendedEntry)+'원':'-')+' · 점수 '+f(r.score)+'</div><span class="stage">'+status+'</span></div><div class="pickAct '+c+'">'+action+'</div></div>';}).join('');}
+async function loadAll(){try{const [market,latest,prePump,focus]=await Promise.all([safe('/api/market/live'),safe('/api/latest'),safe('/api/pre-pump/latest').catch(()=>[]),safe('/api/focus-candidates').catch(()=>null)]);document.getElementById('hero').innerHTML=hero(market);document.getElementById('actions').innerHTML=actionCards(market);document.getElementById('focus').innerHTML=focusCandidates(focus,prePump);document.getElementById('assets').innerHTML=assets(latest,market);document.getElementById('footprints').innerHTML=footprints(market);document.getElementById('top3').innerHTML=top3Cards(prePump);document.getElementById('updated').textContent='업데이트 '+new Date(market.ts||Date.now()).toLocaleString()+' · 60초 자동';}catch(e){document.getElementById('updated').textContent='오류: '+e.message;document.getElementById('hero').innerHTML='<div class="direction bad">데이터 오류</div><div class="action">신규매수 중단 · 엔진 복구 우선</div>';}}
+loadAll();setInterval(loadAll,60000);
+</script></body></html>`));
+
+const port=process.env.PORT||10000;app.listen(port,()=>console.log("GN investment assistant dashboard listening",port));+Number(x).toFixed(2);}
+function focusCandidates(fc,prePump){function box(label,x,currency){if(!x)return '<div class="asset"><div><div class="assetName">'+label+'</div><div class="assetSub">데이터 연결 실패 · 후보 보류</div></div><div class="assetAct warn">대기</div></div>';const ticker=x.ticker||x.symbol;return '<div class="asset"><div><div class="assetName">'+label+' · '+ticker+' · '+x.name+'</div><div class="assetSub">'+x.theme+' · '+x.description+'<br>현재 '+priceText(x.price,currency)+' · 1일 '+pctText(x.r1)+' · 5일 '+pctText(x.r5)+' · 거래량 '+(Number.isFinite(Number(x.volumeRatio))?Number(x.volumeRatio).toFixed(2)+'배':'-')+'</div></div><div class="assetAct '+(x.flowClass||'warn')+'">'+(x.flow||'관찰')+'</div></div>';}
+const crypto=(prePump||[])[0];const cryptoBox=crypto?'<div class="asset"><div><div class="assetName">크립토 · '+String(crypto.market||crypto.coin||'').replace('KRW-','')+'</div><div class="assetSub">Pre-Pump 선행탐지 · 현재 '+(crypto.krwPrice!=null?n(crypto.krwPrice)+'원':'-')+' · 점수 '+f(crypto.score)+' · '+String(crypto.status||crypto.scannerStatus||'')+'</div></div><div class="assetAct '+clsFromAction(crypto.action,crypto.score)+'">'+String(crypto.action||'관찰')+'</div></div>':'<div class="asset"><div><div class="assetName">크립토</div><div class="assetSub">현재 유효 후보 없음 · 강제 선발 안 함</div></div><div class="assetAct warn">대기</div></div>';
+return box('미국주식',fc?.us?.winner,'USD')+box('한국주식',fc?.kr?.winner,'KRW')+cryptoBox+box('금/안전자산',fc?.safe?.winner,'USD');}
 function footprints(m){const d=m?.decision||{};const reasons=d.reasons||[];const ai=m?.ai;const aiTxt=ai?.eligible?(ai.sentiment==='risk_on'?'위험선호':ai.sentiment==='risk_off'?'위험회피':'중립'):'표본부족';return '<div class="card"><div class="cardName">유동성/시장폭</div><div class="cardAction '+clsFromAction(d.action,d.score)+'">'+(d.regime||'확인 중')+'</div><div class="cardMeta">시장점수 '+f(d.score)+'</div></div><div class="card"><div class="cardName">AI 5개 합의</div><div class="cardAction neutral">'+aiTxt+'</div><div class="cardMeta">'+(ai?.successCount||0)+'/5 · 신뢰도 '+(ai?.confidence!=null?Math.round(ai.confidence*100)+'%':'-')+'</div></div><div class="card"><div class="cardName">현재 핵심 근거</div><div class="cardAction neutral">'+(reasons[0]?'유지':'관찰')+'</div><div class="cardMeta">'+(reasons[0]||'새 선행 변화 없음')+'</div></div>';}
 function top3Cards(rows){const top=(rows||[]).slice(0,3);if(!top.length)return '<div class="empty">현재 유효 후보 없음 — 억지로 3개를 채우지 않음</div>';return top.map((r,i)=>{const name=String(r.market||r.coin||'').replace('KRW-','');const action=String(r.action||'관찰');const status=String(r.status||r.scannerStatus||'');const c=clsFromAction(action,r.score);return '<div class="pick"><div class="rank">'+(r.rank||i+1)+'</div><div><div class="pickName">'+name+'</div><div class="pickMeta">현재 '+(r.krwPrice!=null?n(r.krwPrice)+'원':'-')+' · 최초/진입 '+(r.recommendedEntry!=null?n(r.recommendedEntry)+'원':'-')+' · 점수 '+f(r.score)+'</div><span class="stage">'+status+'</span></div><div class="pickAct '+c+'">'+action+'</div></div>';}).join('');}
 async function loadAll(){try{const [market,latest,prePump]=await Promise.all([safe('/api/market/live'),safe('/api/latest'),safe('/api/pre-pump/latest').catch(()=>[])]);document.getElementById('hero').innerHTML=hero(market);document.getElementById('actions').innerHTML=actionCards(market);document.getElementById('assets').innerHTML=assets(latest,market);document.getElementById('footprints').innerHTML=footprints(market);document.getElementById('top3').innerHTML=top3Cards(prePump);document.getElementById('updated').textContent='업데이트 '+new Date(market.ts||Date.now()).toLocaleString()+' · 60초 자동';}catch(e){document.getElementById('updated').textContent='오류: '+e.message;document.getElementById('hero').innerHTML='<div class="direction bad">데이터 오류</div><div class="action">신규매수 중단 · 엔진 복구 우선</div>';}}
