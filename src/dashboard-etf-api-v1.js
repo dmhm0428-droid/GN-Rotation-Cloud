@@ -10,16 +10,23 @@ const ETF_WATCHLIST=[
   {code:"0023A0",name:"SOL 미국양자컴퓨팅TOP10"},
   {code:"449450",name:"PLUS K방산"}
 ];
+const VERIFIED_HOLDINGS={
+  "487230":{avgPrice:21475,quantity:65},
+  "0173Y0":{avgPrice:14814,quantity:268},
+  "0023A0":{avgPrice:34818,quantity:56},
+  "449450":{avgPrice:60938,quantity:8}
+};
 const URL=process.env.SUPABASE_URL,KEY=process.env.SUPABASE_SERVICE_ROLE_KEY;
 const db=URL&&KEY?createClient(URL,KEY,{auth:{persistSession:false,autoRefreshToken:false}}):null;
 const TTL_MS=15000;
 let cache={at:0,data:null};
 function num(v){if(v==null)return null;const n=Number(String(v).replaceAll(",","").replaceAll("%","").trim());return Number.isFinite(n)?n:null;}
 async function retirementMap(){
-  if(!db)return {};
+  if(!db)return VERIFIED_HOLDINGS;
   const {data,error}=await db.from("gn_retirement_holdings").select("code,avg_price,quantity").eq("active",true);
-  if(error)return {};
-  return Object.fromEntries((data||[]).map(x=>[x.code,{avgPrice:num(x.avg_price),quantity:num(x.quantity)}]));
+  if(error)return VERIFIED_HOLDINGS;
+  const stored=Object.fromEntries((data||[]).map(x=>[x.code,{avgPrice:num(x.avg_price),quantity:num(x.quantity)}]));
+  return {...stored,...VERIFIED_HOLDINGS};
 }
 async function fetchWithTimeout(url,timeout=6000){
   const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
@@ -65,7 +72,14 @@ async function latest(){
   if(cache.data&&Date.now()-cache.at<TTL_MS)return cache.data;
   const holdings=await retirementMap();
   const items=await Promise.all(ETF_WATCHLIST.map(item=>quote(item,holdings[item.code])));
-  const data={ts:new Date().toISOString(),items,source:"NAVER_FINANCE_PUBLIC_QUOTE",ok:items.some(x=>x.price!=null)};
+  let fx={pair:"USD/KRW",price:null,changePct:null,tradedAt:null,source:"UNAVAILABLE",error:null};
+  try{
+    const j=await fetchWithTimeout("https://query1.finance.yahoo.com/v8/finance/chart/KRW%3DX?interval=1m&range=1d");
+    const m=j?.chart?.result?.[0]?.meta||{},price=num(m.regularMarketPrice),prev=num(m.chartPreviousClose??m.previousClose);
+    if(price==null)throw new Error("NO_FX_PRICE");
+    fx={pair:"USD/KRW",price,changePct:prev?((price/prev)-1)*100:null,tradedAt:m.regularMarketTime?new Date(Number(m.regularMarketTime)*1000).toISOString():null,source:"YAHOO_FX",error:null};
+  }catch(e){fx.error=String(e?.name==="AbortError"?"TIMEOUT":e?.message||e);}
+  const data={ts:new Date().toISOString(),items,fx,source:"NAVER_FINANCE_PUBLIC_QUOTE",ok:items.some(x=>x.price!=null)};
   cache={at:Date.now(),data};return data;
 }
 function wrappedExpress(...args){
