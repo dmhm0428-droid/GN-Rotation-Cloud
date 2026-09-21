@@ -6,6 +6,17 @@ const previousExpress=require("express");
 const TTL_MS=5*60*1000;
 let cache={at:0,data:null};
 
+// S&P Global Ratings latest U.S. maturity schedule (USD bn).
+// Includes rated bonds, loans and revolving facilities; this is the broad maturity wall,
+// not a claim that every dollar is specifically a 3Y/5Y bond.
+const MATURITY_WALL=[
+  {year:2026,totalBn:907.6,specNonfinBn:142.3},
+  {year:2027,totalBn:1117.6,specNonfinBn:246.6},
+  {year:2028,totalBn:1464.6,specNonfinBn:551.3},
+  {year:2029,totalBn:1332.0,specNonfinBn:533.0},
+  {year:2030,totalBn:1256.7,specNonfinBn:416.3}
+];
+
 const n=v=>Number.isFinite(Number(v))?Number(v):null;
 function pct(a,b){
   const x=n(a),y=n(b);
@@ -79,6 +90,19 @@ async function fredDiesel(){
     source:"FRED GASDESW · U.S. On-Highway Diesel Fuel Price"
   };
 }
+async function fredMarketSeries(id,lookbackDays=180){
+  const d=new Date(Date.now()-lookbackDays*86400000),cosd=d.toISOString().slice(0,10);
+  const csv=await fetchText(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(id)}&cosd=${cosd}`);
+  const rows=parseFred(csv);
+  if(rows.length<2)throw new Error(`FRED ${id} insufficient`);
+  const last=rows.at(-1),p5=rows[Math.max(0,rows.length-6)],p20=rows[Math.max(0,rows.length-21)];
+  return {
+    id,value:last.value,asOf:last.date,
+    chg5dBp:+((last.value-p5.value)*100).toFixed(1),
+    chg20dBp:+((last.value-p20.value)*100).toFixed(1),
+    source:`FRED ${id}`
+  };
+}
 function detectShockAnchor(rows){
   if(!Array.isArray(rows)||rows.length<25)return {detected:false,date:rows?.at(-1)?.ts?new Date(rows.at(-1).ts):new Date(),reason:"현재월 기준"};
   const cutoff=Date.now()-60*86400000;
@@ -103,11 +127,21 @@ function windowText(anchor,a,b){
 }
 function buildTimeline(anchor){
   return [
-    {lag:"0~1개월",window:windowText(anchor,0,1),target:"정제마진·운임·기업 구매가",meaning:"선행 비용 압력"},
-    {lag:"1~2개월",window:windowText(anchor,1,2),target:"PPI 운송·도매 원가",meaning:"생산자물가 전이 감시"},
-    {lag:"2~4개월",window:windowText(anchor,2,4),target:"CPI·PCE 운송/상품/서비스 일부",meaning:"소비자물가 전이 감시"},
-    {lag:"3~6개월",window:windowText(anchor,3,6),target:"기업마진·기대인플레·10Y 재압력",meaning:"우리의 핵심 지연충격 시계월"}
+    {lag:"0~1개월",window:windowText(anchor,0,1),macro:"정제마진·운임·기업 구매가",credit:"HY 스프레드 선행 확대 여부",market:"고베타·AI 변동성 먼저 확인"},
+    {lag:"1~2개월",window:windowText(anchor,1,2),macro:"PPI 운송·도매 원가",credit:"2Y 상승·추가긴축 기대 재가격",market:"AI·크립토 밸류에이션 압박"},
+    {lag:"2~4개월",window:windowText(anchor,2,4),macro:"CPI·PCE 운송/상품/서비스",credit:"2Y·10Y 고착 → 신규 차환쿠폰 상승",market:"AI CAPEX·레버리지 취약주 압박"},
+    {lag:"3~6개월",window:windowText(anchor,3,6),macro:"기업마진·기대인플레·10Y",credit:"HY OAS + 차환비용 동시상승 여부",market:"위험자산 전반 되돌림 경계"},
+    {lag:"6~12개월",window:windowText(anchor,6,12),macro:"고금리 누적효과",credit:"2027 만기벽·조기차환 창구 점검",market:"신용 선별·부도율·AI 투자속도"},
+    {lag:"12~24개월",window:windowText(anchor,12,24),macro:"고금리 지속 여부가 핵심",credit:"2028 미국 만기벽 집중구간",market:"금리가 높게 남으면 차환 스트레스 증폭"}
   ];
+}
+function creditSignal(us2y,hy){
+  const y2=n(us2y?.chg5dBp),h=n(hy?.chg5dBp);
+  if(h!=null&&y2!=null&&h>=25&&y2>=15)return {label:"동시 압박",color:"orange",reason:`HY +${h.toFixed(0)}bp · 2Y +${y2.toFixed(0)}bp/5D`};
+  if(h!=null&&h>=25)return {label:"신용 악화",color:"orange",reason:`HY OAS +${h.toFixed(0)}bp/5D`};
+  if(y2!=null&&y2>=15)return {label:"금리 재가격",color:"yellow",reason:`2Y +${y2.toFixed(0)}bp/5D`};
+  if(h!=null&&h<=-20&&y2!=null&&y2<=0)return {label:"압력 완화",color:"green",reason:"HY 축소 + 2Y 안정"};
+  return {label:"감시",color:"yellow",reason:"신용·금리 동시악화 미확인"};
 }
 function classify(ulsd,retail){
   const f5=n(ulsd?.chg5dPct),f20=n(ulsd?.chg20dPct),wow=n(retail?.wowPct),w4=n(retail?.fourWeekPct);
@@ -122,13 +156,15 @@ async function loadDieselFootprint(){
     yahooSeries("HO=F","6mo","1d"),
     fredDiesel(),
     yahooSeries("CL=F","3mo","1d"),
-    yahooSeries("^TNX","3mo","1d")
+    yahooSeries("^TNX","3mo","1d"),
+    fredMarketSeries("DGS2",180),
+    fredMarketSeries("BAMLH0A0HYM2",180)
   ]);
   const val=(i)=>settled[i].status==="fulfilled"?settled[i].value:null;
-  const errors=settled.map((r,i)=>r.status==="rejected"?`${["ULSD","RETAIL","WTI","10Y"][i]}:${String(r.reason?.message||r.reason)}`:null).filter(Boolean);
-  const ulsd=val(0),retail=val(1),wti=val(2),tenY=val(3);
+  const errors=settled.map((r,i)=>r.status==="rejected"?`${["ULSD","RETAIL","WTI","10Y","2Y","HY_OAS"][i]}:${String(r.reason?.message||r.reason)}`:null).filter(Boolean);
+  const ulsd=val(0),retail=val(1),wti=val(2),tenY=val(3),us2y=val(4),hyOas=val(5);
   const anchor=detectShockAnchor(ulsd?.rows||[]);
-  const state=classify(ulsd,retail);
+  const state=classify(ulsd,retail),credit=creditSignal(us2y,hyOas);
   const data={
     updatedAt:new Date().toISOString(),
     available:!!(ulsd||retail),
@@ -139,9 +175,13 @@ async function loadDieselFootprint(){
     retail,
     wti:wti?{price:wti.price,tradedAt:wti.tradedAt,chg5dPct:wti.chg5dPct,unit:"USD/bbl",source:wti.source}:null,
     us10y:tenY?{yieldPct:tenY.price,tradedAt:tenY.tradedAt,chg5dPct:tenY.chg5dPct,unit:"%",source:tenY.source}:null,
+    us2y:us2y?{yieldPct:us2y.value,asOf:us2y.asOf,chg5dBp:us2y.chg5dBp,chg20dBp:us2y.chg20dBp,source:us2y.source}:null,
+    hyOas:hyOas?{spreadPct:hyOas.value,asOf:hyOas.asOf,chg5dBp:hyOas.chg5dBp,chg20dBp:hyOas.chg20dBp,source:hyOas.source}:null,
+    creditSignal:credit,
     anchor:{detected:anchor.detected,date:anchor.date.toISOString(),reason:anchor.reason},
     timeline:buildTimeline(anchor.date),
-    hypothesis:"디젤 가격 충격이 지속될 경우 초기 운임·PPI에 먼저 나타나고, 광범위한 물가·기업마진·장기금리 압력은 약 3~6개월 지연될 수 있다는 GN PIVOT 감시 가설",
+    maturityWall:MATURITY_WALL,
+    hypothesis:"디젤 충격의 직접 전이는 0~6개월을 우선 감시하고, 이후에는 고금리가 지속될 때 회사채 만기벽과 결합하는지를 별도로 본다. 만기벽 자체를 디젤의 직접 결과로 간주하지 않는다.",
     errors
   };
   cache={at:now,data};
