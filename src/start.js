@@ -43,6 +43,7 @@ function runEventLead(){
 // then the authoritative renderer, so the post-processors receive its final HTML.
 const preloads=[
   "dashboard-policy-detected-v1.js",
+  "dashboard-diesel-footprint-v1.js",
   "dashboard-stable-capital-v1.js",
   "dashboard-top3-revalidation-v3.js",
   "dashboard-us-stock-footprint-v1.js",
