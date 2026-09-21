@@ -42,7 +42,6 @@ function runEventLead(){
 // Response wrappers run in reverse preload order. Put final UI post-processors first,
 // then the authoritative renderer, so the post-processors receive its final HTML.
 const preloads=[
-  "dashboard-investment-link-v1.js",
   "dashboard-policy-detected-v1.js",
   "dashboard-stable-capital-v1.js",
   "dashboard-top3-revalidation-v3.js",
