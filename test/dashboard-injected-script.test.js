@@ -41,10 +41,11 @@ test("policy dashboard always renders six fixed headings and hides legacy scorec
   assert.match(authoritative,/id="legacyPolicyEarlyWarning" style="display:none"/);
 });
 
-test("authoritative stock tabs show live prices without stale fixed buy ranges",()=>{
+test("authoritative stock and retirement tabs expose actionable detail",()=>{
   const src=fs.readFileSync(path.resolve(__dirname,"..","src","dashboard-authoritative-v1.js"),"utf8");
   assert.match(src,/\/api\/risk-buy-fx/);
-  assert.match(src,/AI전력 · 현재가/);
-  assert.match(src,/AI전력·AI네트워크 · 현재가/);
-  assert.doesNotMatch(src,/현재가 · 1차 · 2차 매수가/);
+  assert.match(src,/추천 매수가/);
+  assert.match(src,/buyPrice/);
+  assert.match(src,/평가금액/);
+  assert.match(src,/미보유 감시/);
 });

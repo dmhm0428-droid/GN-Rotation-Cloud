@@ -28,6 +28,7 @@ async function cryptoFocus(req,res){
   }catch(e){res.status(502).json({error:String(e.message||e)});}
 }
 const BODY=`<body><style>
+.asset{background:#11161c;border:1px solid #2d3945;border-radius:16px;overflow:hidden}.asset summary{cursor:pointer;list-style:none;display:grid;grid-template-columns:1.4fr .9fr .9fr .9fr;gap:8px;padding:13px;align-items:center}.asset summary::-webkit-details-marker{display:none}.asset summary:after{content:'＋';color:#65aaff;font-weight:900;text-align:right}.asset[open] summary:after{content:'－'}.detail{border-top:1px solid #27313b;padding:11px 13px;color:#bdc8d2;font-size:12px;line-height:1.65}.buy{color:#ffcc61;font-weight:900}.good{color:#67d49a}.bad{color:#ff8d8d}@media(max-width:620px){.asset summary{grid-template-columns:1.35fr 1fr;position:relative;padding-right:34px}.asset summary:after{position:absolute;right:12px}}
 *{box-sizing:border-box}body{margin:0;background:#080a0d;color:#eef2f6;font-family:system-ui,-apple-system,sans-serif}.wrap{max-width:900px;margin:auto;padding:18px 14px 50px}.top{display:flex;justify-content:space-between;align-items:center;gap:10px}.title{font-size:30px;font-weight:950}.muted{color:#8794a2;font-size:12px}.actions{display:flex;gap:8px}.actions button,.actions a,.tab{background:#151b22;border:1px solid #33404d;color:#e8eef5;padding:10px 13px;border-radius:11px;text-decoration:none;font-size:13px}.hero,.card,.row,.panel{background:#11161c;border:1px solid #2d3945;border-radius:16px}.hero{margin-top:14px;padding:18px}.label{font-size:12px;color:#97a4b0;font-weight:800}.big{font-size:27px;font-weight:950;margin-top:4px}.subline{margin-top:7px;color:#c7d0d8;font-size:14px}.facts{margin-top:13px;padding-top:12px;border-top:1px solid #27313b;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.card{padding:13px}.name{font-size:12px;color:#96a3af}.value{font-size:19px;font-weight:900;margin-top:4px}.meta{font-size:11px;color:#82909d;margin-top:4px;line-height:1.5}.tabs{display:flex;gap:7px;overflow:auto;margin-top:18px;padding-bottom:3px}.tab{white-space:nowrap;cursor:pointer}.tab.on{background:#1477e8;border-color:#2c91ff}.section{margin-top:18px}.head{display:flex;justify-content:space-between;align-items:end;margin:0 2px 8px}.head b{font-size:19px}.rows{display:grid;gap:8px}.row{display:grid;grid-template-columns:1.4fr .9fr .9fr .9fr;gap:8px;padding:13px;align-items:center}.plan{margin-top:10px;padding:14px}.plan b{font-size:16px}.plantext{margin-top:7px;color:#cbd4dc;font-size:13px;line-height:1.55}.empty{padding:16px;border:1px solid #2d3945;border-radius:14px;color:#8b98a5;background:#11161c}.foot{margin-top:22px;text-align:center;color:#697681;font-size:10px}@media(max-width:620px){.facts{grid-template-columns:repeat(2,1fr)}.row{grid-template-columns:1.3fr 1fr}.hideM{display:none}.title{font-size:27px}}
 </style><div class="wrap"><div class="top"><div><div class="title">GN PIVOT</div><div id="updated" class="muted">실시간 데이터 확인 중…</div></div><div class="actions"><button id="refresh" onclick="refreshGN()">새로고침</button><a href="/logout">로그아웃</a></div></div>
 <div class="hero" id="legacyPolicyEarlyWarning" style="display:none"><div class="label">정책·유동성 선행경보</div><div id="stage" class="big">WATCH</div><div id="stageLine" class="subline">정책·국채시장 방어 흔적 감시</div><div id="facts" class="facts"></div></div>
@@ -40,6 +41,9 @@ const BODY=`<body><style>
 <script>(function(){
 const $=id=>document.getElementById(id),N=v=>Number(v),ok=v=>Number.isFinite(N(v)),nf=v=>ok(v)?N(v).toLocaleString():'--',usd=v=>ok(v)?'$'+N(v).toLocaleString(undefined,{maximumFractionDigits:2}):'--',esc=v=>String(v==null?'':v).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
 function lowDistance(price,low){if(!ok(price)||!ok(low)||N(price)<=0)return'--';return((N(low)/N(price)-1)*100).toFixed(1)+'%';}
+function assetCard(a,b,c,d,detail){return '<details class="asset"><summary><b>'+a+'</b><span>'+b+'</span><span>'+c+'</span><span class="hideM">'+d+'</span></summary><div class="detail">'+detail+'</div></details>'}
+function money(v){return ok(v)?Math.round(N(v)).toLocaleString()+'원':'--'}
+function stockCard(x){const cur=x.currency==='USD'?usd(x.price):money(x.price),buy=x.currency==='USD'?usd(x.buyPrice):money(x.buyPrice),gap=ok(x.price)&&ok(x.buyPrice)?((N(x.buyPrice)/N(x.price)-1)*100).toFixed(1)+'%':'--';return assetCard(esc(x.name),'<b>현재 '+cur+'</b>','<span class="buy">추천 '+buy+'</span>',esc(x.theme||''),'<b>'+esc(x.theme||'')+'</b><br>'+esc(x.detail||'')+'<br>현재가 대비 추천가 '+gap+' · 추천가 도달 전 추격 금지')}
 async function j(u,ms=12000){const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);try{const r=await fetch(u+(u.includes('?')?'&':'?')+'t='+Date.now(),{cache:'no-store',signal:c.signal});if(r.status===401){location.href='/login';throw Error('login')}if(!r.ok)throw Error('HTTP '+r.status);return r.json()}finally{clearTimeout(t)}}
 let core=null,portfolio=null,etf=null,cryptoFocus=null,riskBuy=null,active='crypto';
 function positions(p){let a=[];if(Array.isArray(p))a=p;else if(Array.isArray(p?.assets))a=p.assets;else if(Array.isArray(p?.positions))a=p.positions;else if(Array.isArray(p?.exchanges))p.exchanges.forEach(x=>(x.positions||[]).forEach(y=>a.push(Object.assign({exchange:x.exchange},y))));return a}
@@ -50,6 +54,35 @@ function renderTab(){const p=positions(portfolio),body=$('tabBody'),plan=$('plan
 function renderSave(){const s=core?.saveBrief||{},verified=Array.isArray(s.verified)?s.verified:[];$('saveState').textContent=s.saveChecked?'SAVE 확인 · 역검증 '+verified.length+'건':'SAVE 미연결 · 공개자료만 검증';$('saveBoard').innerHTML=verified.length?verified.slice(0,3).map(x=>'<div class="plantext"><b>'+esc(x.topic||'시장')+'</b> · '+esc(x.fact||'')+'<br><span class="muted">'+esc(x.validation||'교차검증 대기')+'</span></div>').join(''):'<div class="plantext">SAVE 원문이 직접 확인되지 않은 내용은 투자신호로 승격하지 않음.</div>'}
 function renderConclusion(){const rows=(core?.cryptoRadar||[]).filter(x=>x.status==='ENTRY'),fx=etf?.fx?.price,s=core?.saveBrief||{};let action=s.action||'대기',why=s.summary||'검증된 신규 ENTRY 없음';if(!s.action&&rows.length){action='선발대만';why=esc(String(rows[0].market||'').replace('KRW-',''))+' · 조건 통과, 추격 금지'}if(s.conflict){action='신규진입 보류';why='SAVE와 교차검증 자료 충돌'}$('assistantConclusion').innerHTML='<div class="label">결론</div><div class="big">'+esc(action)+'</div><div class="subline">'+esc(why)+(fx?' · 원/달러 '+nf(fx)+'원':'')+'</div>'}
 function renderJulyLowTab(){if(active!=='us')return;const rows=(riskBuy?.items||[]).filter(x=>x.currency==='USD');$('tabState').textContent='AI전력·AI네트워크 · 현재가';$('tabBody').innerHTML=rows.length?rows.map(x=>'<div class="row"><b>'+esc(x.name)+'</b><span>현재 '+usd(x.price)+'</span><span>'+esc(x.theme||'AI 인프라')+'</span><span class="hideM">실시간</span></div>').join(''):'<div class="empty">미국주식 현재가 불러오는 중…</div>';$('plan').innerHTML='<b>현재 주도축</b><div class="plantext">AI 전력·냉각·네트워크 인프라를 우선 표시. 고정 매수가·과거 저가 신호는 제거.</div>';$('plan').style.display='block'}
+function renderRichTab(){
+  const p=positions(portfolio),body=$('tabBody'),plan=$('plan'),titles={crypto:'크립토',us:'미국주식',kr:'국내주식',etf:'ETF·연금',cash:'현금·자산'};
+  $('tabTitle').textContent=titles[active];plan.style.display='block';
+  if(active==='crypto'){
+    const rows=cryptoFocus?.items||[];$('tabState').textContent='업비트 실시간 원화';
+    body.innerHTML=rows.length?rows.map(r=>assetCard(esc(r.symbol),'<b>현재 '+nf(r.price)+'원</b>','실시간','','업비트 원화 현물 현재가 · 매수 추천은 TOP3 하드게이트 통과 시만 표시')).join(''):'<div class="empty">실시간 원화 가격 불러오는 중…</div>';
+    plan.style.display='none';return;
+  }
+  if(active==='kr'||active==='us'){
+    const currency=active==='kr'?'KRW':'USD',rows=(riskBuy?.items||[]).filter(x=>x.currency===currency);
+    $('tabState').textContent='현재가 · 추천 매수가';
+    body.innerHTML=rows.length?rows.map(stockCard).join(''):'<div class="empty">주식 현재가 불러오는 중…</div>';
+    plan.innerHTML='<b>매수 기준</b><div class="plantext">추천 매수가는 1차 분할 기준. 현재가가 추천가보다 높으면 추격하지 않고 기다림. 카드를 누르면 종목 설명과 현재가 대비 거리를 표시.</div>';return;
+  }
+  if(active==='etf'){
+    const rows=Array.isArray(etf?.items)?etf.items:[],fx=etf?.fx||{};$('tabState').textContent='수량 · 평단 · 평가금액 · 손익';
+    const fxCard=fx.price?assetCard('원/달러 환율','<b>'+nf(fx.price)+'원</b>',ok(fx.changePct)?((N(fx.changePct)>=0?'+':'')+N(fx.changePct).toFixed(2)+'%'):'--','',esc(fx.source||'실시간 환율')):'<div class="empty">원/달러 환율 재조회 중…</div>';
+    body.innerHTML=fxCard+(rows.length?rows.map(x=>{
+      const held=ok(x.avgPrice)&&N(x.avgPrice)>0&&ok(x.quantity)&&N(x.quantity)>0,pnl=held&&ok(x.pnlPct)?((N(x.pnlPct)>=0?'+':'')+N(x.pnlPct).toFixed(1)+'%'):'미보유 감시',value=held&&ok(x.price)?N(x.price)*N(x.quantity):null,cost=held?N(x.avgPrice)*N(x.quantity):null,profit=value!=null&&cost!=null?value-cost:null,pc=profit>=0?'good':'bad';
+      return assetCard(esc(x.name||x.code),'<b>현재 '+nf(x.price)+'원</b>',held?'평단 '+nf(x.avgPrice)+'원':'미보유 감시',held?'수량 '+nf(x.quantity)+'주':'',held?('종목코드 '+esc(x.code)+'<br>평가금액 <b>'+money(value)+'</b> · 매입금액 '+money(cost)+'<br>평가손익 <span class="'+pc+'">'+(profit>=0?'+':'')+money(profit)+' ('+pnl+')</span>'):('종목코드 '+esc(x.code)+' · 보유 수량과 평단이 등록되지 않은 감시종목'));
+    }).join(''):'<div class="empty">퇴직연금 현재가 재조회 중…</div>');
+    plan.innerHTML='<b>퇴직연금 상세</b><div class="plantext">카드를 누르면 수량·매입금액·평가금액·평가손익이 펼쳐짐. 평단 0은 수익률 0%로 꾸미지 않고 미보유 감시로 구분.</div>';return;
+  }
+  $('tabState').textContent='보유 · 평단 · 현재수치';const rows=p.filter(x=>cls(x)===active);
+  body.innerHTML=rows.length?rows.map(r=>row(r,'krw')).join(''):'<div class="empty">연결된 보유 데이터 없음</div>';
+  plan.innerHTML='<b>대기자금</b><div class="plantext">연결된 KRW·USD 등 현금성 자산만 표시.</div>';
+}
+renderTab=renderRichTab;
+renderJulyLowTab=function(){};
 function titlesForJuly(tab){return tab==='kr'?'국내주식':'미국주식'}
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));b.classList.add('on');active=b.dataset.tab;renderTab();renderJulyLowTab()});
 async function load(){const rs=await Promise.allSettled([j('/api/live-summary'),j('/api/portfolio',8000),j('/api/etf/latest',8000),j('/api/crypto-focus',8000),j('/api/risk-buy-fx',8000),j('/api/save-brief',8000)]);if(rs[0].status==='fulfilled')core=rs[0].value;if(rs[1].status==='fulfilled')portfolio=rs[1].value;if(rs[2].status==='fulfilled')etf=rs[2].value;if(rs[3].status==='fulfilled')cryptoFocus=rs[3].value;if(rs[4].status==='fulfilled')riskBuy=rs[4].value;if(rs[5].status==='fulfilled')core=Object.assign({},core||{},{saveBrief:rs[5].value});renderCore();renderTab();renderJulyLowTab();renderSave();renderConclusion();const fail=rs.filter(x=>x.status==='rejected').length;$('updated').textContent=(fail?'부분 데이터 '+fail+' · ':'실시간 · ')+new Date().toLocaleTimeString()+' · 15초 자동'}
