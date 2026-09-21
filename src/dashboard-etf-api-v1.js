@@ -21,18 +21,45 @@ async function retirementMap(){
   if(error)return {};
   return Object.fromEntries((data||[]).map(x=>[x.code,{avgPrice:num(x.avg_price),quantity:num(x.quantity)}]));
 }
-async function quote(item,holding){
-  const c=new AbortController(),tm=setTimeout(()=>c.abort(),6000);
+async function fetchWithTimeout(url,timeout=6000){
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeout);
   try{
-    const url=`https://polling.finance.naver.com/api/realtime/domestic/stock/${encodeURIComponent(item.code)}`;
-    const r=await fetch(url,{headers:{"user-agent":"Mozilla/5.0 GN-PIVOT/1.0","accept":"application/json"},signal:c.signal});
+    const r=await fetch(url,{headers:{"user-agent":"Mozilla/5.0 GN-PIVOT/1.0","accept":"application/json"},signal:controller.signal});
     if(!r.ok)throw new Error(`HTTP ${r.status}`);
-    const p=await r.json(),q=p?.datas?.[0];if(!q)throw new Error("NO_QUOTE_DATA");
-    const price=num(q.closePrice),avgPrice=holding?.avgPrice??null,quantity=holding?.quantity??null;
-    const name=avgPrice!=null?`${item.name} · 평단 ${Math.round(avgPrice).toLocaleString()}원 · ${Math.round(quantity||0).toLocaleString()}주`:item.name;
-    return {...item,name,avgPrice,quantity,price,pnlPct:price!=null&&avgPrice!=null?((price/avgPrice)-1)*100:null,change:num(q.compareToPreviousClosePrice),changePct:num(q.fluctuationsRatio),marketStatus:q.marketStatus||null,tradedAt:q.localTradedAt||null,source:"NAVER_FINANCE_PUBLIC_QUOTE"};
-  }catch(e){return {...item,avgPrice:holding?.avgPrice??null,quantity:holding?.quantity??null,price:null,error:String(e?.name==="AbortError"?"QUOTE_TIMEOUT":e?.message||e),source:"UNAVAILABLE"};}
-  finally{clearTimeout(tm);}
+    return await r.json();
+  }finally{clearTimeout(timer);}
+}
+function normalized(item,holding,q,source){
+  const price=num(q?.closePrice??q?.regularMarketPrice??q?.price),
+        avgPrice=holding?.avgPrice??null,
+        quantity=holding?.quantity??null,
+        prev=num(q?.previousClose??q?.chartPreviousClose??q?.previousClosePrice),
+        change=num(q?.compareToPreviousClosePrice??q?.regularMarketChange),
+        changePct=num(q?.fluctuationsRatio??q?.regularMarketChangePercent) ?? (price!=null&&prev?((price/prev)-1)*100:null),
+        tradedAt=q?.localTradedAt||q?.tradedAt||(q?.regularMarketTime?new Date(Number(q.regularMarketTime)*1000).toISOString():null),
+        marketStatus=q?.marketStatus||q?.marketState||null;
+  if(price==null)throw new Error("NO_PRICE");
+  return {...item,avgPrice,quantity,price,pnlPct:price!=null&&avgPrice!=null?((price/avgPrice)-1)*100:null,change,changePct,marketStatus,tradedAt,source};
+}
+async function quote(item,holding){
+  const errors=[];
+  try{
+    const p=await fetchWithTimeout(`https://polling.finance.naver.com/api/realtime/domestic/stock/${encodeURIComponent(item.code)}`);
+    const q=p?.datas?.[0];
+    if(!q)throw new Error("NO_QUOTE_DATA");
+    return normalized(item,holding,q,"NAVER_POLLING");
+  }catch(e){errors.push("naver_polling:"+String(e?.name==="AbortError"?"TIMEOUT":e?.message||e));}
+  try{
+    const q=await fetchWithTimeout(`https://m.stock.naver.com/api/stock/${encodeURIComponent(item.code)}/basic`);
+    return normalized(item,holding,q,"NAVER_MOBILE");
+  }catch(e){errors.push("naver_mobile:"+String(e?.name==="AbortError"?"TIMEOUT":e?.message||e));}
+  try{
+    const j=await fetchWithTimeout(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(item.code+".KS")}?interval=1m&range=1d`);
+    const meta=j?.chart?.result?.[0]?.meta;
+    if(!meta)throw new Error("NO_QUOTE_DATA");
+    return normalized(item,holding,meta,"YAHOO_KRX_FALLBACK");
+  }catch(e){errors.push("yahoo:"+String(e?.name==="AbortError"?"TIMEOUT":e?.message||e));}
+  return {...item,avgPrice:holding?.avgPrice??null,quantity:holding?.quantity??null,price:null,error:errors.join(" | "),source:"UNAVAILABLE"};
 }
 async function latest(){
   if(cache.data&&Date.now()-cache.at<TTL_MS)return cache.data;
