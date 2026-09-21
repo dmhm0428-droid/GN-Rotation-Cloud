@@ -17,6 +17,12 @@ const MATURITY_WALL=[
   {year:2030,totalBn:1256.7,specNonfinBn:416.3}
 ];
 
+// FEC: next regularly scheduled federal general election is 2026-11-03.
+// Political events are displayed as timing markers only; no directional market verdict is assigned.
+const POLICY_EVENTS=[
+  {date:"2026-11-03",label:"미국 연방 총선(중간선거)",watch:"결과 이후 재정·규제·에너지정책 재가격 확인",source:"FEC"}
+];
+
 const n=v=>Number.isFinite(Number(v))?Number(v):null;
 function pct(a,b){
   const x=n(a),y=n(b);
@@ -181,6 +187,7 @@ async function loadDieselFootprint(){
     anchor:{detected:anchor.detected,date:anchor.date.toISOString(),reason:anchor.reason},
     timeline:buildTimeline(anchor.date),
     maturityWall:MATURITY_WALL,
+    policyEvents:POLICY_EVENTS,
     hypothesis:"디젤 충격의 직접 전이는 0~6개월을 우선 감시하고, 이후에는 고금리가 지속될 때 회사채 만기벽과 결합하는지를 별도로 본다. 만기벽 자체를 디젤의 직접 결과로 간주하지 않는다.",
     errors
   };
@@ -191,7 +198,7 @@ async function loadDieselFootprint(){
 const STYLE=`<style id="gn-diesel-footprint-style-v2">
 #gnDieselFootprint{margin:14px 0;background:#10151b;border:1px solid #2d3945;border-radius:16px;padding:15px}.gnDfHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.gnDfTitle{font-size:17px;font-weight:950}.gnDfSub{font-size:11px;color:#8794a2;margin-top:3px}.gnDfStates{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.gnDfState{font-size:11px;font-weight:900;border:1px solid #3a4652;border-radius:999px;padding:6px 9px;white-space:nowrap}.gnDfState.green{color:#55d98b}.gnDfState.yellow{color:#ffd166}.gnDfState.orange{color:#ff9f43}.gnDfGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}.gnDfCard{background:#121920;border:1px solid #27313b;border-radius:12px;padding:10px}.gnDfLabel{font-size:10px;color:#8f9ca8}.gnDfValue{font-size:18px;font-weight:950;margin-top:3px}.gnDfMeta{font-size:10px;color:#8f9ca8;margin-top:3px}.gnDfSectionLabel{margin-top:14px;font-size:12px;font-weight:950;color:#cbd4dc}.gnDfTimeline{margin-top:6px;border-top:1px solid #27313b}.gnDfRow{display:grid;grid-template-columns:.65fr 2.35fr;gap:10px;padding:10px 2px;border-bottom:1px solid #202a33;font-size:11px;align-items:start}.gnDfLag{font-weight:950}.gnDfWindow{color:#ffd166;font-weight:850;margin-top:3px;line-height:1.4}.gnDfPath{display:grid;gap:4px;color:#cbd4dc;line-height:1.45}.gnDfPath b{color:#8f9ca8;font-size:9px;margin-right:5px}.gnMwGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:7px}.gnMwCard{background:#121920;border:1px solid #27313b;border-radius:11px;padding:9px}.gnMwCard.peak{border-color:#ff9f43}.gnMwYear{font-size:11px;color:#9aa7b4}.gnMwTotal{font-size:16px;font-weight:950;margin-top:3px}.gnMwSpec{font-size:9px;color:#8f9ca8;margin-top:3px;line-height:1.4}.gnDfNote{margin-top:10px;color:#8f9ca8;font-size:10px;line-height:1.55}.gnDfErr{color:#ff8585}@media(max-width:620px){.gnDfHead{display:block}.gnDfStates{justify-content:flex-start;margin-top:8px}.gnDfGrid{grid-template-columns:repeat(2,1fr)}.gnDfRow{grid-template-columns:1fr}.gnDfPath{padding-bottom:2px}.gnMwGrid{grid-template-columns:repeat(2,1fr)}}
 </style>`;
-const PANEL=`<section id="gnDieselFootprint"><div class="gnDfHead"><div><div class="gnDfTitle">시장 발자국 · 디젤 → 물가·금리 → 회사채/AI</div><div class="gnDfSub">ULSD · 미국 소매 디젤 · 2Y/10Y · HY OAS · 시계월 · 회사채 만기벽</div></div><div class="gnDfStates"><div id="gnDfState" class="gnDfState yellow">디젤 감시</div><div id="gnCrState" class="gnDfState yellow">신용 감시</div></div></div><div id="gnDfGrid" class="gnDfGrid"><div class="gnDfCard"><div class="gnDfLabel">ULSD 선물</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 소매 디젤</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 2Y</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 10Y</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">HY OAS</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">WTI</div><div class="gnDfValue">--</div></div></div><div class="gnDfSectionLabel">디젤 충격 전이 시계월</div><div id="gnDfTimeline" class="gnDfTimeline"></div><div class="gnDfSectionLabel">고금리 지속 시 미국 회사채·대출 만기벽</div><div id="gnMwGrid" class="gnMwGrid"></div><div id="gnDfNote" class="gnDfNote">디젤·신용 시계월 계산 중…</div></section>`;
+const PANEL=`<section id="gnDieselFootprint"><div class="gnDfHead"><div><div class="gnDfTitle">시장 발자국 · 디젤 → 물가·금리 → 회사채/AI</div><div class="gnDfSub">ULSD · 미국 소매 디젤 · 2Y/10Y · HY OAS · 시계월 · 회사채 만기벽</div></div><div class="gnDfStates"><div id="gnDfState" class="gnDfState yellow">디젤 감시</div><div id="gnCrState" class="gnDfState yellow">신용 감시</div></div></div><div id="gnDfGrid" class="gnDfGrid"><div class="gnDfCard"><div class="gnDfLabel">ULSD 선물</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 소매 디젤</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 2Y</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 10Y</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">HY OAS</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">WTI</div><div class="gnDfValue">--</div></div></div><div class="gnDfSectionLabel">디젤 충격 전이 시계월</div><div id="gnDfTimeline" class="gnDfTimeline"></div><div class="gnDfSectionLabel">정책 이벤트 마커</div><div id="gnPolicyEvents" class="gnDfTimeline"></div><div class="gnDfSectionLabel">고금리 지속 시 미국 회사채·대출 만기벽</div><div id="gnMwGrid" class="gnMwGrid"></div><div id="gnDfNote" class="gnDfNote">디젤·신용 시계월 계산 중…</div></section>`;
 const SCRIPT=`<script id="gn-diesel-footprint-ui-v2">(function(){
 function n(v){var x=Number(v);return Number.isFinite(x)?x:null}
 function f(v,d){var x=n(v);return x==null?'--':x.toFixed(d==null?2:d)}
@@ -199,7 +206,7 @@ function p(v){var x=n(v);return x==null?'--':(x>=0?'+':'')+x.toFixed(2)+'%'}
 function bp(v){var x=n(v);return x==null?'--':(x>=0?'+':'')+x.toFixed(0)+'bp'}
 function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function render(d){
- var s=document.getElementById('gnDfState'),cs=document.getElementById('gnCrState'),g=document.getElementById('gnDfGrid'),t=document.getElementById('gnDfTimeline'),mw=document.getElementById('gnMwGrid'),note=document.getElementById('gnDfNote');if(!s||!cs||!g||!t||!mw||!note)return;
+ var s=document.getElementById('gnDfState'),cs=document.getElementById('gnCrState'),g=document.getElementById('gnDfGrid'),t=document.getElementById('gnDfTimeline'),pe=document.getElementById('gnPolicyEvents'),mw=document.getElementById('gnMwGrid'),note=document.getElementById('gnDfNote');if(!s||!cs||!g||!t||!pe||!mw||!note)return;
  s.className='gnDfState '+(d.color||'yellow');s.textContent='디젤 '+(d.state||'감시')+' · '+(d.stage||'');
  var cr=d.creditSignal||{};cs.className='gnDfState '+(cr.color||'yellow');cs.textContent='신용 '+(cr.label||'감시');
  var u=d.ulsd||{},r=d.retail||{},w=d.wti||{},y=d.us10y||{},y2=d.us2y||{},hy=d.hyOas||{};
@@ -289,6 +296,7 @@ require.cache[expressPath].exports=wrappedExpress;
 module.exports={pct,detectShockAnchor,buildTimeline,classify,loadDieselFootprint};
 +f(w.price,2)+'</div><div class="gnDfMeta">5D '+p(w.chg5dPct)+'</div></div>';
  t.innerHTML=(d.timeline||[]).map(function(x){return '<div class="gnDfRow"><div><div class="gnDfLag">'+esc(x.lag)+'</div><div class="gnDfWindow">'+esc(x.window)+'</div></div><div class="gnDfPath"><div><b>미국지표</b>'+esc(x.macro)+'</div><div><b>신용/차환</b>'+esc(x.credit)+'</div><div><b>시장반응</b>'+esc(x.market)+'</div></div></div>'}).join('');
+ pe.innerHTML=(d.policyEvents||[]).map(function(x){var days=Math.ceil((new Date(x.date+'T00:00:00Z').getTime()-Date.now())/86400000);var when=days>0?'D-'+days:(days===0?'오늘':'경과');return '<div class="gnDfRow"><div><div class="gnDfLag">'+esc(x.date)+'</div><div class="gnDfWindow">'+esc(when)+'</div></div><div class="gnDfPath"><div><b>이벤트</b>'+esc(x.label)+'</div><div><b>확인</b>'+esc(x.watch)+'</div><div><b>판정</b>선거 결과 자체가 아니라 금리·HY·AI·에너지 가격 반응 확인</div></div></div>'}).join('');
  var wall=d.maturityWall||[],peak=Math.max.apply(null,wall.map(function(x){return Number(x.totalBn)||0}));
  mw.innerHTML=wall.map(function(x){return '<div class="gnMwCard '+(Number(x.totalBn)===peak?'peak':'')+'"><div class="gnMwYear">'+esc(x.year)+'</div><div class="gnMwTotal">
 
