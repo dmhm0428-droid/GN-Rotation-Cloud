@@ -23,6 +23,7 @@ jobs:
       - run: node --check src/dashboard-policy-detected-v1.js
       - run: node --check src/policy-ai-runner.js
       - run: node --check src/dashboard-etf-api-v1.js
+      - run: node --check src/dashboard-retirement-signal-v1.js
       - run: node --check src/precursor-dashboard.js
       - run: node --check src/dashboard-precursor-top3-v1.js
       - run: node --check src/dashboard-resilience-patch.js
@@ -82,6 +83,8 @@ jobs:
           [ "$(grep -o 'id="top3"' /tmp/dashboard.html | wc -l)" -eq 1 ] || { echo 'duplicate TOP3 renderer shell'; exit 1; }
           grep -q 'Pre-Pump TOP3' /tmp/dashboard.html || { echo 'canonical TOP3 semantics missing'; exit 1; }
           grep -q '/api/risk-buy-fx' /tmp/dashboard.html || { echo 'live risk/buy feed missing'; exit 1; }
+          grep -q 'id="gnRetSignal"' /tmp/dashboard.html || { echo 'retirement leading-signal panel missing'; exit 1; }
+          grep -q '/api/retirement-signal' /tmp/dashboard.html || { echo 'retirement leading-signal feed missing'; exit 1; }
           grep -q '/api/save-brief' /tmp/dashboard.html || { echo 'SAVE brief feed missing'; exit 1; }
           if grep -q 'gn-final-style-v3' /tmp/dashboard.html; then echo 'conflicting final full-body renderer unexpectedly active'; exit 1; fi
           if grep -q 'gn-partial-loading-v1' /tmp/dashboard.html; then echo 'broken partial loader unexpectedly active'; exit 1; fi
