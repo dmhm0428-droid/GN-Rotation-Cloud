@@ -8,13 +8,17 @@ const ETF_WATCHLIST=[
   {code:"0173Y0",name:"KODEX 미국AI광통신네트워크"},
   {code:"491010",name:"TIGER 글로벌AI전력인프라액티브"},
   {code:"0023A0",name:"SOL 미국양자컴퓨팅TOP10"},
-  {code:"449450",name:"PLUS K방산"}
+  {code:"449450",name:"PLUS K방산"},
+  {code:"329750",name:"TIGER 미국달러단기채권액티브"},
+  {code:"360750",name:"TIGER 미국S&P500"}
 ];
 const VERIFIED_HOLDINGS={
   "487230":{avgPrice:21475,quantity:65},
   "0173Y0":{avgPrice:14814,quantity:268},
   "0023A0":{avgPrice:34818,quantity:56},
-  "449450":{avgPrice:60938,quantity:8}
+  "449450":{avgPrice:60938,quantity:8},
+  "329750":{avgPrice:14225,quantity:210},
+  "360750":{avgPrice:2981995/105,quantity:105}
 };
 const URL=process.env.SUPABASE_URL,KEY=process.env.SUPABASE_SERVICE_ROLE_KEY;
 const db=URL&&KEY?createClient(URL,KEY,{auth:{persistSession:false,autoRefreshToken:false}}):null;

@@ -85,6 +85,8 @@ jobs:
           grep -q '/api/risk-buy-fx' /tmp/dashboard.html || { echo 'live risk/buy feed missing'; exit 1; }
           grep -q 'id="gnRetSignal"' /tmp/dashboard.html || { echo 'retirement leading-signal panel missing'; exit 1; }
           grep -q '/api/retirement-signal' /tmp/dashboard.html || { echo 'retirement leading-signal feed missing'; exit 1; }
+          grep -q 'id="grsNews"' /tmp/dashboard.html || { echo 'retirement news-risk verification panel missing'; exit 1; }
+          grep -q '뉴스·악재 검증' /tmp/dashboard.html || { echo 'news-risk semantics missing'; exit 1; }
           grep -q '/api/save-brief' /tmp/dashboard.html || { echo 'SAVE brief feed missing'; exit 1; }
           if grep -q 'gn-final-style-v3' /tmp/dashboard.html; then echo 'conflicting final full-body renderer unexpectedly active'; exit 1; fi
           if grep -q 'gn-partial-loading-v1' /tmp/dashboard.html; then echo 'broken partial loader unexpectedly active'; exit 1; fi
