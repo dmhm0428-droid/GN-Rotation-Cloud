@@ -8,7 +8,7 @@ const SEASONAL_WATCH={
     {label:"Q1 환매창",months:[3],startDay:1,endDay:25,note:"3월 초~중순 집중"},
     {label:"Q2 환매창",months:[6],startDay:1,endDay:30,note:"6월 전월 감시"},
     {label:"Q3 환매창",months:[9],startDay:1,endDay:25,note:"9월 1~25일 집중"},
-    {label:"Q4 환매창",months:[12,1],startDay:1,endDay:15,note:"12월~다음해 1월 초 연장"}
+    {label:"Q4 환매창",months:[12],startDay:1,endDay:31,note:"12월 전월 감시"},\n    {label:"Q4 이월 확인",months:[1],startDay:1,endDay:15,note:"다음해 1월 초 후속 공시 확인"}
   ],
   march2026Reference:{
     BX:{headlineDayPct:-3.8,mar2Close:115.33,mar12Close:102.12,mar12Low:101.73,closeDrawdownPct:-11.45,intradayDrawdownPct:-11.79},
