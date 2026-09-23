@@ -3,6 +3,25 @@
 const expressPath=require.resolve("express");
 const previousExpress=require("express");
 
+const SEASONAL_WATCH={
+  windows:[
+    {label:"Q1 환매창",months:[3],startDay:1,endDay:25,note:"3월 초~중순 집중"},
+    {label:"Q2 환매창",months:[6],startDay:1,endDay:30,note:"6월 전월 감시"},
+    {label:"Q3 환매창",months:[9],startDay:1,endDay:25,note:"9월 1~25일 집중"},
+    {label:"Q4 환매창",months:[12,1],startDay:1,endDay:15,note:"12월~다음해 1월 초 연장"}
+  ],
+  march2026Reference:{
+    BX:{headlineDayPct:-3.8,mar2Close:115.33,mar12Close:102.12,mar12Low:101.73,closeDrawdownPct:-11.45,intradayDrawdownPct:-11.79},
+    ARES:{mar2Close:113.36,mar12Close:96.50,closeDrawdownPct:-14.87},
+    note:"3월 3일은 사모신용 환매 뉴스와 동시에 중동/유가·인플레이션 우려로 S&P500 -0.94%가 겹쳐 전체 낙폭을 사모신용 단독 영향으로 볼 수 없음."
+  }
+};
+function seasonalState(now=new Date()){
+  const m=now.getUTCMonth()+1,d=now.getUTCDate();
+  const current=SEASONAL_WATCH.windows.find(w=>w.months.includes(m)&&d>=w.startDay&&d<=w.endDay)||null;
+  return {active:!!current,current,month:m,day:d,windows:SEASONAL_WATCH.windows,march2026Reference:SEASONAL_WATCH.march2026Reference};
+}
+
 const VERIFIED={
   asOf:"2026-09-23",
   privateCredit:{
@@ -60,7 +79,7 @@ async function api(req,res){
   const [mndy,igv]=await Promise.all([yahooQuote("MNDY"),yahooQuote("IGV")]);
   const quality=qualityState(VERIFIED.mndy),price=priceState(mndy,igv,quality);
   res.set("Cache-Control","no-store");
-  res.json({ts:new Date().toISOString(),verified:VERIFIED,quality,price,quotes:{MNDY:mndy,IGV:igv},rules:{
+  res.json({ts:new Date().toISOString(),verified:VERIFIED,seasonalWatch:seasonalState(),quality,price,quotes:{MNDY:mndy,IGV:igv},rules:{
     addOnGate:["매출 성장 유지(기본 15%+)","영업현금흐름 양수","FCF 양수","현금·유가증권 충분","연간 가이던스 유지","섹터 동반하락 확인"],
     invalidation:["매출 성장/가이던스 급격한 하향","영업현금흐름 또는 FCF 음전","순현금 급감·외부차입 의존 상승","기업고유 회계·수요·제품 경쟁력 악재"]
   }});
@@ -84,7 +103,7 @@ function esc(v){return String(v==null?'':v).replace(/[&<>"]/g,function(c){return
 function n(v,d){var x=Number(v);return Number.isFinite(x)?x.toFixed(d==null?1:d):'--'}
 function usd(v){var x=Number(v);return Number.isFinite(x)?'$'+x.toFixed(2):'--'}
 function mount(){if(document.getElementById('gnPrivateCreditQuality'))return;var box=document.createElement('section');box.id='gnPrivateCreditQuality';box.innerHTML='<div class="head"><div><div class="title">사모신용 스트레스 → 질적 성장주 추매 필터</div><div class="stage" id="pcqStage">불러오는 중</div><div class="line" id="pcqLine">실적·성장·현금흐름과 섹터 동반하락을 함께 확인</div></div><div class="muted">PRIVATE CREDIT / SOFTWARE QUALITY</div></div><div class="grid"><div class="card" id="pcqCredit"></div><div class="card" id="pcqMndy"></div></div><div class="gates" id="pcqGates"></div>';var anchor=document.getElementById('gnInvestmentLink')||document.getElementById('gnBigPicture');if(anchor&&anchor.parentNode)anchor.parentNode.insertBefore(box,anchor.nextSibling);else{var wrap=document.querySelector('.wrap')||document.querySelector('main')||document.body;wrap.insertBefore(box,wrap.firstChild)}}
-async function load(){mount();try{var r=await fetch('/api/private-credit-quality?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);var d=await r.json(),v=d.verified||{},pc=v.privateCredit||{},m=v.mndy||{},q=d.quality||{},p=d.price||{},mq=(d.quotes||{}).MNDY||{},sq=(d.quotes||{}).IGV||{};var st=document.getElementById('pcqStage'),ln=document.getElementById('pcqLine');if(st){st.textContent=p.stage+' · '+p.label;st.className='stage '+(p.stage==='READY'?'good':p.stage==='WAIT'?'bad':'warn')}if(ln)ln.textContent=p.reason||'';var c=document.getElementById('pcqCredit');if(c)c.innerHTML='<b>사모신용 위험</b><div class="value warn">'+esc(pc.label||'--')+'</div><div class="line">Apollo 환매요청 '+n(pc.apollo&&pc.apollo.requestPct)+'% (전분기 '+n(pc.apollo&&pc.apollo.priorPct)+'%) · 실제 환매한도 '+n(pc.apollo&&pc.apollo.repurchaseCapPct)+'%</div><div class="line">MS '+n(pc.morganStanley&&pc.morganStanley.requestPct)+'% · 소프트웨어 대출 장부가 이하 '+n(pc.bdcSoftware&&pc.bdcSoftware.markedBelowCostPct)+'% · 비수익대출 '+n(pc.bdcSoftware&&pc.bdcSoftware.nonAccrualPct)+'%</div><div class="muted" style="margin-top:6px">'+esc(pc.interpretation||'')+'</div>';var x=document.getElementById('pcqMndy');if(x)x.innerHTML='<b>MNDY 펀더멘털 게이트</b><div class="value '+(q.pass?'good':'bad')+'">'+esc(q.label||'--')+'</div><div class="line">현재 '+usd(mq.price)+' · 일간 '+n(mq.changePct)+'% · IGV '+n(sq.changePct)+'%</div><div class="line">매출 +'+n(m.revenueGrowthPct)+'% · OCF $'+n(m.operatingCashFlowM)+'M · 조정 FCF $'+n(m.adjustedFcfM)+'M</div><div class="line">현금+유가증권 $'+n(m.cashAndSecuritiesM/1000,3)+'B · 연간 매출 가이던스 +'+n(m.fyRevenueGrowthGuideLowPct,0)+'~'+n(m.fyRevenueGrowthGuideHighPct,0)+'%</div><div class="muted" style="margin-top:6px">'+esc(m.aiArrNote||'')+'</div>';var g=document.getElementById('pcqGates'),rules=d.rules||{};if(g)g.innerHTML='<b>추매 조건</b> · '+(rules.addOnGate||[]).map(esc).join(' → ')+'<br><b>무효화</b> · '+(rules.invalidation||[]).map(esc).join(' · ')+'<br><span class="muted">핵심: 섹터 전체가 먼저 밀려도 실적·성장·현금흐름이 유지되는 기업은 별도 추적. 가격 하락만으로 ACTION 처리하지 않음.</span>';}catch(e){var st=document.getElementById('pcqStage');if(st)st.textContent='재조회 중';}}
+async function load(){mount();try{var r=await fetch('/api/private-credit-quality?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);var d=await r.json(),v=d.verified||{},pc=v.privateCredit||{},m=v.mndy||{},q=d.quality||{},p=d.price||{},mq=(d.quotes||{}).MNDY||{},sq=(d.quotes||{}).IGV||{};var st=document.getElementById('pcqStage'),ln=document.getElementById('pcqLine');if(st){st.textContent=p.stage+' · '+p.label;st.className='stage '+(p.stage==='READY'?'good':p.stage==='WAIT'?'bad':'warn')}if(ln)ln.textContent=p.reason||'';var c=document.getElementById('pcqCredit');if(c){var sw=d.seasonalWatch||{},mr=sw.march2026Reference||{},bx=mr.BX||{},ar=mr.ARES||{},win=(sw.windows||[]).map(function(w){return w.label+' '+w.months.join('/')+'월 '+w.startDay+'~'+w.endDay+'일'}).join(' · ');c.innerHTML='<b>사모신용 위험</b><div class="value warn">'+esc(pc.label||'--')+'</div><div class="line">Apollo 환매요청 '+n(pc.apollo&&pc.apollo.requestPct)+'% (전분기 '+n(pc.apollo&&pc.apollo.priorPct)+'%) · 실제 환매한도 '+n(pc.apollo&&pc.apollo.repurchaseCapPct)+'%</div><div class="line">MS '+n(pc.morganStanley&&pc.morganStanley.requestPct)+'% · 소프트웨어 대출 장부가 이하 '+n(pc.bdcSoftware&&pc.bdcSoftware.markedBelowCostPct)+'% · 비수익대출 '+n(pc.bdcSoftware&&pc.bdcSoftware.nonAccrualPct)+'%</div><div class="line '+(sw.active?'warn':'')+'"><b>분기 환매 감시창</b> · '+(sw.active?('현재 진입 · '+esc(sw.current&&sw.current.label)):'현재 비활성')+'</div><div class="muted">'+esc(win)+'</div><div class="line">2026년 3월 참고 · BX 뉴스당일 '+n(bx.headlineDayPct)+'% · 3/2→3/12 종가 '+n(bx.closeDrawdownPct)+'% · ARES '+n(ar.closeDrawdownPct)+'%</div><div class="muted" style="margin-top:6px">'+esc(mr.note||'')+'</div><div class="muted" style="margin-top:6px">'+esc(pc.interpretation||'')+'</div>';}var x=document.getElementById('pcqMndy');if(x)x.innerHTML='<b>MNDY 펀더멘털 게이트</b><div class="value '+(q.pass?'good':'bad')+'">'+esc(q.label||'--')+'</div><div class="line">현재 '+usd(mq.price)+' · 일간 '+n(mq.changePct)+'% · IGV '+n(sq.changePct)+'%</div><div class="line">매출 +'+n(m.revenueGrowthPct)+'% · OCF $'+n(m.operatingCashFlowM)+'M · 조정 FCF $'+n(m.adjustedFcfM)+'M</div><div class="line">현금+유가증권 $'+n(m.cashAndSecuritiesM/1000,3)+'B · 연간 매출 가이던스 +'+n(m.fyRevenueGrowthGuideLowPct,0)+'~'+n(m.fyRevenueGrowthGuideHighPct,0)+'%</div><div class="muted" style="margin-top:6px">'+esc(m.aiArrNote||'')+'</div>';var g=document.getElementById('pcqGates'),rules=d.rules||{};if(g)g.innerHTML='<b>추매 조건</b> · '+(rules.addOnGate||[]).map(esc).join(' → ')+'<br><b>무효화</b> · '+(rules.invalidation||[]).map(esc).join(' · ')+'<br><span class="muted">핵심: 섹터 전체가 먼저 밀려도 실적·성장·현금흐름이 유지되는 기업은 별도 추적. 가격 하락만으로 ACTION 처리하지 않음.</span>';}catch(e){var st=document.getElementById('pcqStage');if(st)st.textContent='재조회 중';}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){mount();load()});else{mount();load()}setInterval(load,60000);window.gnPrivateCreditQuality=load;
 })();</script>`;
 
