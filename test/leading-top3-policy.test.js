@@ -7,7 +7,7 @@ function flow(values=[1.05,1.12,1.25,1.45,1.75]){
   return [120,60,30,15,0].map((offsetMin,index)=>({offsetMin,ratio:values[index]}));
 }
 function row(market,rank,overrides={}){
-  return {market,rank,mechanicalScore:85,maAlignment:75,ma20Slope:.25,obv1h:.25,volumeAccel5m:2,repeatCount:2,riseSinceFirstPct:1,candidateAgeMin:1,preExpansionEligible:true,return60m:.01,extensionFromLow2h:.02,globalSpotExchangeCount:2,globalExchangeSync:1,volumeTimeSeries:flow(),empiricalValidation:{lead_core:true,lagging:false},...overrides};
+  return {market,rank,mechanicalScore:100,maAlignment:100,ma20Slope:.5,obv1h:.5,volumeAccel5m:2,repeatCount:3,riseSinceFirstPct:1,candidateAgeMin:1,preExpansionEligible:true,return60m:.01,extensionFromLow2h:.02,globalSpotExchangeCount:3,globalExchangeSync:1,volumeTimeSeries:flow(),empiricalValidation:{lead_core:true,lagging:false},...overrides};
 }
 
 test("missing overseas fields never enter TOP3 or authorize ENTRY",()=>{
@@ -38,6 +38,18 @@ test("ENTRY is an upgrade after the same pre-expansion gate",()=>{
   assert.equal(out.top3[0].market,"KRW-ENTRY");
   assert.equal(stageOf(out.top3[0]),"ENTRY");
   assert.equal(out.top3.some(x=>x.market==="KRW-SCOUT"),true);
+});
+
+test("ENTRY without a same-row 5AI pass is blocked",()=>{
+  const out=selectLeadingTop3([row("KRW-NO-AI",1,{strictImmediate:true,entryAllowed:true,fiveAiGateOk:false})]);
+  assert.deepEqual(out.top3,[]);
+});
+
+test("a few clustered persisted snapshots cannot impersonate a time-flow trend",()=>{
+  const clustered=flow().map((x,i)=>({...x,offsetMin:10-i*2}));
+  const out=selectLeadingTop3([row("KRW-CIRCULAR",1,{volumeTimeSeries:clustered})]);
+  assert.deepEqual(out.top3,[]);
+  assert.equal(timeFlowSignal({volumeTimeSeries:clustered}).available,false);
 });
 
 test("hard lagging/overheated rows do not enter TOP3 and remain explainable near-miss",()=>{
