@@ -92,12 +92,7 @@ async function load(){mount();try{var r=await fetch('/api/bank-capacity-treasury
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',function(){mount();load()});else{mount();load()}setInterval(load,60000);window.gnBankCapacity=load;
 })();</script>`;
 
-function patchHtml(html){
-  if(typeof html!=="string"||!html.includes("GN PIVOT")||html.includes("gn-bank-capacity-v1"))return html;
-  let out=html;
-  if(out.includes("</head>"))out=out.replace("</head>",STYLE+"</head>");
-  return out.replace("</body>",SCRIPT+"</body>");
-}
+function patchHtml(html){return html;}
 function wrappedExpress(...args){
   const app=previousExpress(...args);
   app.get("/api/bank-capacity-treasury",api);
