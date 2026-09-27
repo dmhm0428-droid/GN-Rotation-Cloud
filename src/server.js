@@ -111,10 +111,11 @@ app.get("/",(req,res)=>res.type("html").send(`<!doctype html><html lang="ko"><he
 <div class="section"><div class="sectionTitle"><b>오늘 판단</b><span class="muted">시장 → 자금 → 후보</span></div><div class="cards" id="actions"></div></div>
 <div class="section"><div class="sectionTitle"><b>자산군별 집중 후보 · 각 1개</b><span class="muted">미국주식 · 한국주식 · 크립토 · 금/안전자산</span></div><div class="assetGrid" id="focus"></div><div class="detailWrap" id="focusDetail"></div></div>
 <div class="section"><div class="sectionTitle"><b>핵심 크립토 추적</b><span class="muted">BTC · ETH 실시간 엔진</span></div><div class="assetGrid" id="assets"></div><div class="detailWrap" id="assetDetail"></div></div>
+<div class="section"><div class="sectionTitle"><b>보유자산 · 거래소</b><span class="muted">연동된 계좌만 표시</span></div><div class="detailWrap" id="portfolioDetail"></div></div>
 <div class="section"><div class="sectionTitle"><b>돈의 발자국</b><span class="muted">장기채 · 유가/디젤 · 유동성 · 달러/환율 변화와 연결</span></div><div class="cards" id="footprints"></div><div class="detailWrap" id="footprintDetail"></div></div>
 <div class="section"><div class="sectionTitle"><b>Pre-Pump TOP3</b><span class="muted">원본 ENTRY/관리 상태</span></div><div class="top3" id="top3"></div><div class="detailWrap" id="top3Detail"></div></div>
 <div class="foot">자산군별 1개 · 후보가 없으면 비워둔다 · 강제 TOP3 금지 · 추격보다 선행탐지 우선</div></div><script>
-const f=x=>Number.isFinite(Number(x))?Number(x).toFixed(1):'-';const n=x=>x==null?'':Number(x).toLocaleString();
+const f=x=>x!=null&&x!==''&&Number.isFinite(Number(x))?Number(x).toFixed(1):'-';const n=x=>x==null?'':Number(x).toLocaleString();
 async function safe(url){const r=await fetch(url);if(r.status===401){location.href='/login';throw new Error('로그인이 필요합니다');}if(!r.ok)throw new Error(await r.text());return r.json();}
 function clsFromAction(raw,score){const s=String(raw||'').toUpperCase();if(s.includes('매수금지')||s.includes('NO_CHASE')||s.includes('SELL')||s.includes('EXIT')||s.includes('청산')||s.includes('물타기금지'))return'bad';if(s.includes('추가매수')||s.includes('확인매수')||s.includes('ENTRY')||s.includes('BUY')||s.includes('진입')||s.includes('익절')||s.includes('러너유지'))return'good';const v=Number(score);if(Number.isFinite(v)&&v<35)return'bad';if(Number.isFinite(v)&&v>=65)return'good';return'warn';}
 function direction(d){const s=Number(d?.score)||50;if(s<35)return['위험 회피 우세','현금 우선 · 신규매수 중단','bad'];if(s<50)return['조정 우세','추격 금지 · 현금 유지','warn'];if(s<65)return['중립 / 방향 탐색','선발대만 · 확인 후 확대','warn'];return['위험선호 우세','분할매수 가능 · 과열 추격 금지','good'];}
@@ -169,9 +170,10 @@ line('재추격 / 물타기',r.newEntryAllowed?'조건부 허용':'불허 / '+(r
 line('판정 근거',r.actionReason||'-'),
 line('자료 상태',r.stale?'지연 · 신규 진입 금지':'최신 시각 확인')
 ],'최초 신호와 현재 관리 상태를 구분해 표시합니다.')).join('');}
+function renderPortfolioDetails(p,error){if(error)return fail('보유자산 조회 실패 · '+error);if(!p?.exchanges)return fail('보유자산 자료 없음');return p.exchanges.map(ex=>panel(String(ex.exchange||'거래소').toUpperCase()+' · '+(ex.enabled?'연동':'미연동'),ex.error?[line('조회 오류',ex.error)]:ex.enabled?(ex.positions||[]).map(pos=>line((pos.asset||'-')+' · 수량 '+fmt(pos.total,6),(pos.valueQuote==null?'평가액 확인 불가':fmt(pos.valueQuote,2)+' '+(pos.quote||''))+' · 현재 '+fmt(pos.price,4))):[line('상태','계좌 연동 안 됨')],ex.enabled?'기준 '+when(p.updatedAt)+' · 계좌 시세 연동값입니다.':'연동 정보가 없으므로 보유 없음으로 판단하지 않습니다.')).join('');}
 function renderFocusDetails(fc,error){if(error)return fail('주식·금 후보 조회 실패 · '+error);if(!fc)return fail('주식·금 자료 없음');return [['미국주식',fc.us,'USD'],['한국주식',fc.kr,'KRW'],['금/안전자산',fc.safe,'USD']].map(([name,group,currency])=>panel(name+' · 후보별 상세',(group?.all||[]).map(x=>line((x.ticker||x.symbol||'-')+' '+(x.name||''),x.error?'조회 실패: '+x.error:(currency==='KRW'?fmt(x.price,0)+'원':'$'+fmt(x.price,2))+' · 1일 '+(x.r1==null?'-':fmt(x.r1*100,1)+'%')+' · 5일 '+(x.r5==null?'-':fmt(x.r5*100,1)+'%')+' · 거래량 '+fmt(x.volumeRatio,2)+'배')),group?.all?.length?'기준: '+when(fc.ts)+' · 최근 가격·거래량 흐름이며 매수가 추천값은 아직 산출되지 않았습니다.':'자료가 수집되지 않았습니다.')).join('');}
 let loading=false;
-async function loadAll(){if(loading)return;loading=true;try{const urls=['/api/market/live','/api/latest','/api/pre-pump/latest','/api/focus-candidates'];const result=await Promise.allSettled(urls.map(safe));const get=i=>result[i].status==='fulfilled'?result[i].value:null;const err=i=>result[i].status==='rejected'?String(result[i].reason?.message||result[i].reason):null;const market=get(0),latest=get(1),prePump=get(2),focus=get(3);
+async function loadAll(){if(loading)return;loading=true;try{const urls=['/api/market/live','/api/latest','/api/pre-pump/latest','/api/focus-candidates','/api/portfolio'];const result=await Promise.allSettled(urls.map(safe));const get=i=>result[i].status==='fulfilled'?result[i].value:null;const err=i=>result[i].status==='rejected'?String(result[i].reason?.message||result[i].reason):null;const market=get(0),latest=get(1),prePump=get(2),focus=get(3);
 document.getElementById('hero').innerHTML=market?hero(market):'<div class="direction bad">시장 데이터 오류</div><div class="action">신규매수 중단 · 세부 오류 확인</div>';
 document.getElementById('actions').innerHTML=market?actionCards(market):fail(err(0)||'시장 판정 없음');
 document.getElementById('focus').innerHTML=focus?focusCandidates(focus,prePump):fail('후보 조회 실패');
@@ -179,6 +181,7 @@ document.getElementById('assets').innerHTML=latest?assets(latest,market):fail('�
 document.getElementById('footprints').innerHTML=market?footprints(market):fail('발자국 조회 실패');
 document.getElementById('top3').innerHTML=prePump?top3Cards(prePump):fail('TOP3 조회 실패 · 후보 0건 아님');
 document.getElementById('focusDetail').innerHTML=renderFocusDetails(focus,err(3));
+document.getElementById('portfolioDetail').innerHTML=renderPortfolioDetails(get(4),err(4));
 document.getElementById('assetDetail').innerHTML=renderAssetDetails(latest,err(1));
 document.getElementById('footprintDetail').innerHTML=renderMarketDetails(market,err(0));
 document.getElementById('top3Detail').innerHTML=renderTopDetails(prePump,err(2));
