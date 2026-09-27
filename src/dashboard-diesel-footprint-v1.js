@@ -109,6 +109,27 @@ async function fredMarketSeries(id,lookbackDays=180){
     source:`FRED ${id}`
   };
 }
+async function fredLiquiditySeries(id,weekly=true){
+  const d=new Date(Date.now()-120*86400000);
+  const csv=await fetchText(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${encodeURIComponent(id)}&cosd=${d.toISOString().slice(0,10)}`);
+  const rows=parseFred(csv);
+  if(rows.length<5)throw new Error(`FRED ${id} insufficient`);
+  const last=rows.at(-1),prior=rows[Math.max(0,rows.length-(weekly?5:21))];
+  const ageDays=(Date.now()-Date.parse(last.date+"T00:00:00Z"))/86400000;
+  if(!Number.isFinite(ageDays)||ageDays<0||ageDays>(weekly?12:7))throw new Error(`FRED ${id} stale ${last.date}`);
+  const divisor=id==="RRPONTSYD"?1:1000; // RRPONTSYD is already USD billions; weekly H.4.1 series are USD millions.
+  return {id,valueBn:+(last.value/divisor).toFixed(2),change4wBn:+((last.value-prior.value)/divisor).toFixed(2),asOf:last.date,source:`FRED ${id}`};
+}
+function liquiditySignal(reserves,tga,rrp,hy){
+  const reserveChange=reserves?.change4wBn,tgaChange=tga?.change4wBn,spread=hy?.chg5dBp;
+  if([reserveChange,tgaChange,spread].some(v=>!Number.isFinite(v)))
+    return {label:"판정 보류",color:"yellow",reason:"준비금·TGA·HY OAS 중 자료 누락 또는 지연"};
+  if(reserveChange>=0&&tgaChange<=0&&spread<=0)
+    return {label:"완화 확인",color:"green",reason:"준비금 4주 비감소 + TGA 4주 비증가 + HY 5일 비확대"};
+  if(reserveChange<0&&tgaChange>0&&spread>0)
+    return {label:"동시 압박",color:"orange",reason:"준비금 감소 + TGA 증가 + HY 확대"};
+  return {label:"혼조",color:"yellow",reason:"준비금·TGA·신용 방향 불일치 · 확대 매수 조건 미충족"};
+}
 function detectShockAnchor(rows){
   if(!Array.isArray(rows)||rows.length<25)return {detected:false,date:rows?.at(-1)?.ts?new Date(rows.at(-1).ts):new Date(),reason:"현재월 기준"};
   const cutoff=Date.now()-60*86400000;
@@ -164,13 +185,17 @@ async function loadDieselFootprint(){
     yahooSeries("CL=F","3mo","1d"),
     yahooSeries("^TNX","3mo","1d"),
     fredMarketSeries("DGS2",180),
-    fredMarketSeries("BAMLH0A0HYM2",180)
+    fredMarketSeries("BAMLH0A0HYM2",180),
+    fredLiquiditySeries("WRESBAL"),
+    fredLiquiditySeries("WTREGEN"),
+    fredLiquiditySeries("RRPONTSYD",false)
   ]);
   const val=(i)=>settled[i].status==="fulfilled"?settled[i].value:null;
-  const errors=settled.map((r,i)=>r.status==="rejected"?`${["ULSD","RETAIL","WTI","10Y","2Y","HY_OAS"][i]}:${String(r.reason?.message||r.reason)}`:null).filter(Boolean);
+  const errors=settled.map((r,i)=>r.status==="rejected"?`${["ULSD","RETAIL","WTI","10Y","2Y","HY_OAS","RESERVES","TGA","RRP"][i]}:${String(r.reason?.message||r.reason)}`:null).filter(Boolean);
   const ulsd=val(0),retail=val(1),wti=val(2),tenY=val(3),us2y=val(4),hyOas=val(5);
   const anchor=detectShockAnchor(ulsd?.rows||[]);
   const state=classify(ulsd,retail),credit=creditSignal(us2y,hyOas);
+  const liquidity=liquiditySignal(val(6),val(7),val(8),hyOas);
   const data={
     updatedAt:new Date().toISOString(),
     available:!!(ulsd||retail),
@@ -184,6 +209,7 @@ async function loadDieselFootprint(){
     us2y:us2y?{yieldPct:us2y.value,asOf:us2y.asOf,chg5dBp:us2y.chg5dBp,chg20dBp:us2y.chg20dBp,source:us2y.source}:null,
     hyOas:hyOas?{spreadPct:hyOas.value,asOf:hyOas.asOf,chg5dBp:hyOas.chg5dBp,chg20dBp:hyOas.chg20dBp,source:hyOas.source}:null,
     creditSignal:credit,
+    liquidity:{signal:liquidity,reserves:val(6),tga:val(7),rrp:val(8),rule:"완화 확인은 준비금 4주 비감소·TGA 4주 비증가·HY 5일 비확대가 모두 필요. RRP 감소 단독은 유동성 개선 판정 금지. 금리·DXY·환율·유가와 결합 전 매수 승인 금지."},
     anchor:{detected:anchor.detected,date:anchor.date.toISOString(),reason:anchor.reason},
     timeline:buildTimeline(anchor.date),
     maturityWall:MATURITY_WALL,
@@ -196,9 +222,9 @@ async function loadDieselFootprint(){
 }
 
 const STYLE=`<style id="gn-diesel-footprint-style-v2">
-#gnDieselFootprint{margin:14px 0;background:#10151b;border:1px solid #2d3945;border-radius:16px;padding:15px}.gnDfHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.gnDfTitle{font-size:17px;font-weight:950}.gnDfSub{font-size:11px;color:#8794a2;margin-top:3px}.gnDfStates{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.gnDfState{font-size:11px;font-weight:900;border:1px solid #3a4652;border-radius:999px;padding:6px 9px;white-space:nowrap}.gnDfState.green{color:#55d98b}.gnDfState.yellow{color:#ffd166}.gnDfState.orange{color:#ff9f43}.gnDfGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}.gnDfCard{background:#121920;border:1px solid #27313b;border-radius:12px;padding:10px}.gnDfLabel{font-size:10px;color:#8f9ca8}.gnDfValue{font-size:18px;font-weight:950;margin-top:3px}.gnDfMeta{font-size:10px;color:#8f9ca8;margin-top:3px}.gnDfSectionLabel{margin-top:14px;font-size:12px;font-weight:950;color:#cbd4dc}.gnDfTimeline{margin-top:6px;border-top:1px solid #27313b}.gnDfRow{display:grid;grid-template-columns:.65fr 2.35fr;gap:10px;padding:10px 2px;border-bottom:1px solid #202a33;font-size:11px;align-items:start}.gnDfLag{font-weight:950}.gnDfWindow{color:#ffd166;font-weight:850;margin-top:3px;line-height:1.4}.gnDfPath{display:grid;gap:4px;color:#cbd4dc;line-height:1.45}.gnDfPath b{color:#8f9ca8;font-size:9px;margin-right:5px}.gnMwGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:7px}.gnMwCard{background:#121920;border:1px solid #27313b;border-radius:11px;padding:9px}.gnMwCard.peak{border-color:#ff9f43}.gnMwYear{font-size:11px;color:#9aa7b4}.gnMwTotal{font-size:16px;font-weight:950;margin-top:3px}.gnMwSpec{font-size:9px;color:#8f9ca8;margin-top:3px;line-height:1.4}.gnDfNote{margin-top:10px;color:#8f9ca8;font-size:10px;line-height:1.55}.gnDfErr{color:#ff8585}@media(max-width:620px){.gnDfHead{display:block}.gnDfStates{justify-content:flex-start;margin-top:8px}.gnDfGrid{grid-template-columns:repeat(2,1fr)}.gnDfRow{grid-template-columns:1fr}.gnDfPath{padding-bottom:2px}.gnMwGrid{grid-template-columns:repeat(2,1fr)}}
+#gnDieselFootprint{margin:14px 0;background:#10151b;border:1px solid #2d3945;border-radius:16px;padding:15px}.gnDfHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.gnDfTitle{font-size:17px;font-weight:950}.gnDfSub{font-size:11px;color:#8794a2;margin-top:3px}.gnDfStates{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.gnDfState{font-size:11px;font-weight:900;border:1px solid #3a4652;border-radius:999px;padding:6px 9px;white-space:nowrap}.gnDfState.green{color:#55d98b}.gnDfState.yellow{color:#ffd166}.gnDfState.orange{color:#ff9f43}.gnDfGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}.gnDfCard{background:#121920;border:1px solid #27313b;border-radius:12px;padding:10px}.gnDfLabel{font-size:10px;color:#8f9ca8}.gnDfValue{font-size:18px;font-weight:950;margin-top:3px}.gnDfMeta{font-size:10px;color:#8f9ca8;margin-top:3px}.gnDfSectionLabel{margin-top:14px;font-size:12px;font-weight:950;color:#cbd4dc}.gnDfTimeline{margin-top:6px;border-top:1px solid #27313b}.gnDfRow{display:grid;grid-template-columns:.65fr 2.35fr;gap:10px;padding:10px 2px;border-bottom:1px solid #202a33;font-size:11px;align-items:start}.gnDfLag{font-weight:950}.gnDfWindow{color:#ffd166;font-weight:850;margin-top:3px;line-height:1.4}.gnDfPath{display:grid;gap:4px;color:#cbd4dc;line-height:1.45}.gnDfPath b{color:#8f9ca8;font-size:9px;margin-right:5px}.gnMwGrid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:7px}.gnMwCard{background:#121920;border:1px solid #27313b;border-radius:11px;padding:9px}.gnMwCard.peak{border-color:#ff9f43}.gnMwYear{font-size:11px;color:#9aa7b4}.gnMwTotal{font-size:16px;font-weight:950;margin-top:3px}.gnMwSpec{font-size:9px;color:#8f9ca8;margin-top:3px;line-height:1.4}.gnDfNote{margin-top:10px;color:#8f9ca8;font-size:10px;line-height:1.55}.gnDfErr{color:#ff8585}.gnLqDetail{margin-top:12px;border:1px solid #34404c;border-radius:12px;padding:11px;color:#cbd4dc;font-size:11px}.gnLqDetail summary{cursor:pointer;font-weight:900;touch-action:manipulation}.gnLqDetail #gnLqDetail{margin-top:10px;line-height:1.6}.gnLqDetail .gnLqRow{border-top:1px solid #27313b;padding:6px 0}@media(max-width:620px){.gnDfHead{display:block}.gnDfStates{justify-content:flex-start;margin-top:8px}.gnDfGrid{grid-template-columns:repeat(2,1fr)}.gnDfRow{grid-template-columns:1fr}.gnDfPath{padding-bottom:2px}.gnMwGrid{grid-template-columns:repeat(2,1fr)}}
 </style>`;
-const PANEL=`<section id="gnDieselFootprint"><div class="gnDfHead"><div><div class="gnDfTitle">시장 발자국 · 디젤 → 물가·금리 → 회사채/AI</div><div class="gnDfSub">ULSD · 미국 소매 디젤 · 2Y/10Y · HY OAS · 시계월 · 회사채 만기벽</div></div><div class="gnDfStates"><div id="gnDfState" class="gnDfState yellow">디젤 감시</div><div id="gnCrState" class="gnDfState yellow">신용 감시</div></div></div><div id="gnDfGrid" class="gnDfGrid"><div class="gnDfCard"><div class="gnDfLabel">ULSD 선물</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 소매 디젤</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 2Y</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 10Y</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">HY OAS</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">WTI</div><div class="gnDfValue">--</div></div></div><div class="gnDfSectionLabel">디젤 충격 전이 시계월</div><div id="gnDfTimeline" class="gnDfTimeline"></div><div class="gnDfSectionLabel">정책 이벤트 마커</div><div id="gnPolicyEvents" class="gnDfTimeline"></div><div class="gnDfSectionLabel">고금리 지속 시 미국 회사채·대출 만기벽</div><div id="gnMwGrid" class="gnMwGrid"></div><div id="gnDfNote" class="gnDfNote">디젤·신용 시계월 계산 중…</div></section>`;
+const PANEL=`<section id="gnDieselFootprint"><div class="gnDfHead"><div><div class="gnDfTitle">시장 발자국 · 디젤 → 물가·금리 → 회사채/AI</div><div class="gnDfSub">ULSD · 미국 소매 디젤 · 2Y/10Y · HY OAS · 준비금/TGA/RRP · 시계월</div></div><div class="gnDfStates"><div id="gnDfState" class="gnDfState yellow">디젤 감시</div><div id="gnCrState" class="gnDfState yellow">신용 감시</div><div id="gnLqState" class="gnDfState yellow">유동성 판정 대기</div></div></div><div id="gnDfGrid" class="gnDfGrid"><div class="gnDfCard"><div class="gnDfLabel">ULSD 선물</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 소매 디젤</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 2Y</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">미국 10Y</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">HY OAS</div><div class="gnDfValue">--</div></div><div class="gnDfCard"><div class="gnDfLabel">WTI</div><div class="gnDfValue">--</div></div></div><details class="gnLqDetail"><summary>유동성 발자국 · 준비금 / TGA / RRP / 신용</summary><div id="gnLqDetail">자료 확인 중…</div></details><div class="gnDfSectionLabel">디젤 충격 전이 시계월</div><div id="gnDfTimeline" class="gnDfTimeline"></div><div class="gnDfSectionLabel">정책 이벤트 마커</div><div id="gnPolicyEvents" class="gnDfTimeline"></div><div class="gnDfSectionLabel">고금리 지속 시 미국 회사채·대출 만기벽</div><div id="gnMwGrid" class="gnMwGrid"></div><div id="gnDfNote" class="gnDfNote">디젤·신용 시계월 계산 중…</div></section>`;
 const SCRIPT=`<script id="gn-diesel-footprint-ui-v2">(function(){
 function n(v){var x=Number(v);return Number.isFinite(x)?x:null}
 function f(v,d){var x=n(v);return x==null?'--':x.toFixed(d==null?2:d)}
@@ -209,6 +235,11 @@ function render(d){
  var s=document.getElementById('gnDfState'),cs=document.getElementById('gnCrState'),g=document.getElementById('gnDfGrid'),t=document.getElementById('gnDfTimeline'),pe=document.getElementById('gnPolicyEvents'),mw=document.getElementById('gnMwGrid'),note=document.getElementById('gnDfNote');if(!s||!cs||!g||!t||!pe||!mw||!note)return;
  s.className='gnDfState '+(d.color||'yellow');s.textContent='디젤 '+(d.state||'감시')+' · '+(d.stage||'');
  var cr=d.creditSignal||{};cs.className='gnDfState '+(cr.color||'yellow');cs.textContent='신용 '+(cr.label||'감시');
+ var lq=d.liquidity||{},ls=lq.signal||{},lqState=document.getElementById('gnLqState'),lqDetail=document.getElementById('gnLqDetail');
+ if(lqState){lqState.className='gnDfState '+(ls.color||'yellow');lqState.textContent='유동성 '+(ls.label||'판정 보류')}
+ if(lqDetail){var items=[['은행 준비금',lq.reserves],['재무부 TGA',lq.tga],['역레포 RRP',lq.rrp]];
+ lqDetail.innerHTML='<div>'+esc(ls.reason||'자료 확인 중')+'</div>'+items.map(function(item){var x=item[1];return '<div class="gnLqRow"><b>'+item[0]+'</b> '+(x?f(x.valueBn,2)+'십억달러 · 4주 '+(x.change4wBn>=0?'+':'')+f(x.change4wBn,2)+'십억달러 · 기준 '+esc(x.asOf)+' · '+esc(x.source):'수집 실패 또는 지연')+'</div>'}).join('')+'<div>'+esc(lq.rule||'')+'</div>'}
+
  var u=d.ulsd||{},r=d.retail||{},w=d.wti||{},y=d.us10y||{},y2=d.us2y||{},hy=d.hyOas||{};
  g.innerHTML=
  '<div class="gnDfCard"><div class="gnDfLabel">ULSD 선물 HO=F</div><div class="gnDfValue">'+f(u.price,3)+'/gal</div><div class="gnDfMeta">1D '+p(u.chg1dPct)+' · 5D '+p(u.chg5dPct)+' · 20D '+p(u.chg20dPct)+'</div></div>'+
