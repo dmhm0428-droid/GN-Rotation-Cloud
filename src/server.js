@@ -23,8 +23,8 @@ function loginPage(error=""){return `<!doctype html><html lang="ko"><head><meta 
 
 app.use(express.urlencoded({extended:false}));
 app.get("/health",(req,res)=>res.json({ok:true,time:new Date().toISOString(),mode:"INVESTMENT_ASSISTANT"}));
-app.get("/login",(req,res)=>isAuthed(req)?res.redirect("/"):res.type("html").send(loginPage()));
-app.post("/login",(req,res)=>{const u=String(req.body?.username||"");const p=String(req.body?.password||"");if(u!==USER||p!==PASS)return res.status(401).type("html").send(loginPage("아이디 또는 비밀번호가 맞지 않습니다."));const secure=(req.headers["x-forwarded-proto"]||req.protocol)==="https";res.setHeader("Set-Cookie",`${COOKIE_NAME}=${encodeURIComponent(authToken())}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure?"; Secure":""}`);return res.redirect("/");});
+app.get("/login",(req,res)=>isAuthed(req)?res.redirect("/"):res.type("html").end(loginPage()));
+app.post("/login",(req,res)=>{const u=String(req.body?.username||"");const p=String(req.body?.password||"");if(u!==USER||p!==PASS)return res.status(401).type("html").end(loginPage("아이디 또는 비밀번호가 맞지 않습니다."));const secure=(req.headers["x-forwarded-proto"]||req.protocol)==="https";res.setHeader("Set-Cookie",`${COOKIE_NAME}=${encodeURIComponent(authToken())}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure?"; Secure":""}`);return res.redirect("/");});
 app.get("/logout",(req,res)=>{res.setHeader("Set-Cookie",`${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);res.redirect("/login");});
 app.use(auth);app.use(express.json());
 
