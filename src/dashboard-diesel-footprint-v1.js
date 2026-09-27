@@ -211,146 +211,16 @@ function render(d){
  var cr=d.creditSignal||{};cs.className='gnDfState '+(cr.color||'yellow');cs.textContent='신용 '+(cr.label||'감시');
  var u=d.ulsd||{},r=d.retail||{},w=d.wti||{},y=d.us10y||{},y2=d.us2y||{},hy=d.hyOas||{};
  g.innerHTML=
- '<div class="gnDfCard"><div class="gnDfLabel">ULSD 선물 HO=F</div><div class="gnDfValue">
-
-function patchHtml(html){
-  if(typeof html!=="string"||!html.includes("GN PIVOT")||html.includes("gnDieselFootprint"))return html;
-  let out=html.replace("</head>",STYLE+"</head>");
-  if(out.includes('<div class="tabs">'))out=out.replace('<div class="tabs">',PANEL+'<div class="tabs">');
-  else if(out.includes("</header>"))out=out.replace("</header>","</header>"+PANEL);
-  else out=out.replace("</body>",PANEL+"</body>");
-  return out.replace("</body>",SCRIPT+"</body>");
-}
-function wrappedExpress(...args){
-  const app=previousExpress(...args);
-  app.use((req,res,next)=>{
-    if(req.path==="/api/diesel-footprint"){
-      return loadDieselFootprint().then(data=>{res.set("Cache-Control","no-store");res.json(data);}).catch(e=>res.status(500).json({error:String(e?.message||e)}));
-    }
-    const send=res.send.bind(res);
-    res.send=function(body){return send(patchHtml(body));};
-    next();
-  });
-  return app;
-}
-Object.assign(wrappedExpress,previousExpress);
-require.cache[expressPath].exports=wrappedExpress;
-
-module.exports={pct,detectShockAnchor,buildTimeline,classify,loadDieselFootprint};
-+f(u.price,3)+'/gal</div><div class="gnDfMeta">1D '+p(u.chg1dPct)+' · 5D '+p(u.chg5dPct)+' · 20D '+p(u.chg20dPct)+'</div></div>'+
- '<div class="gnDfCard"><div class="gnDfLabel">미국 소매 디젤</div><div class="gnDfValue">
-
-function patchHtml(html){
-  if(typeof html!=="string"||!html.includes("GN PIVOT")||html.includes("gnDieselFootprint"))return html;
-  let out=html.replace("</head>",STYLE+"</head>");
-  if(out.includes('<div class="tabs">'))out=out.replace('<div class="tabs">',PANEL+'<div class="tabs">');
-  else if(out.includes("</header>"))out=out.replace("</header>","</header>"+PANEL);
-  else out=out.replace("</body>",PANEL+"</body>");
-  return out.replace("</body>",SCRIPT+"</body>");
-}
-function wrappedExpress(...args){
-  const app=previousExpress(...args);
-  app.use((req,res,next)=>{
-    if(req.path==="/api/diesel-footprint"){
-      return loadDieselFootprint().then(data=>{res.set("Cache-Control","no-store");res.json(data);}).catch(e=>res.status(500).json({error:String(e?.message||e)}));
-    }
-    const send=res.send.bind(res);
-    res.send=function(body){return send(patchHtml(body));};
-    next();
-  });
-  return app;
-}
-Object.assign(wrappedExpress,previousExpress);
-require.cache[expressPath].exports=wrappedExpress;
-
-module.exports={pct,detectShockAnchor,buildTimeline,classify,loadDieselFootprint};
-+f(r.price,3)+'/gal</div><div class="gnDfMeta">주간 '+p(r.wowPct)+' · 4주 '+p(r.fourWeekPct)+' · '+esc(r.asOf||'')+'</div></div>'+
+ '<div class="gnDfCard"><div class="gnDfLabel">ULSD 선물 HO=F</div><div class="gnDfValue">'+f(u.price,3)+'/gal</div><div class="gnDfMeta">1D '+p(u.chg1dPct)+' · 5D '+p(u.chg5dPct)+' · 20D '+p(u.chg20dPct)+'</div></div>'+
+ '<div class="gnDfCard"><div class="gnDfLabel">미국 소매 디젤</div><div class="gnDfValue">'+f(r.price,3)+'/gal</div><div class="gnDfMeta">주간 '+p(r.wowPct)+' · 4주 '+p(r.fourWeekPct)+' · '+esc(r.asOf||'')+'</div></div>'+
  '<div class="gnDfCard"><div class="gnDfLabel">미국 2Y · 정책기대</div><div class="gnDfValue">'+f(y2.yieldPct,2)+'%</div><div class="gnDfMeta">5D '+bp(y2.chg5dBp)+' · 20D '+bp(y2.chg20dBp)+'</div></div>'+
  '<div class="gnDfCard"><div class="gnDfLabel">미국 10Y · 장기할인율</div><div class="gnDfValue">'+f(y.yieldPct,2)+'%</div><div class="gnDfMeta">5D '+p(y.chg5dPct)+'</div></div>'+
  '<div class="gnDfCard"><div class="gnDfLabel">미국 HY OAS · 신용위험</div><div class="gnDfValue">'+f(hy.spreadPct,2)+'%</div><div class="gnDfMeta">5D '+bp(hy.chg5dBp)+' · 20D '+bp(hy.chg20dBp)+'</div></div>'+
- '<div class="gnDfCard"><div class="gnDfLabel">WTI</div><div class="gnDfValue">
-
-function patchHtml(html){
-  if(typeof html!=="string"||!html.includes("GN PIVOT")||html.includes("gnDieselFootprint"))return html;
-  let out=html.replace("</head>",STYLE+"</head>");
-  if(out.includes('<div class="tabs">'))out=out.replace('<div class="tabs">',PANEL+'<div class="tabs">');
-  else if(out.includes("</header>"))out=out.replace("</header>","</header>"+PANEL);
-  else out=out.replace("</body>",PANEL+"</body>");
-  return out.replace("</body>",SCRIPT+"</body>");
-}
-function wrappedExpress(...args){
-  const app=previousExpress(...args);
-  app.use((req,res,next)=>{
-    if(req.path==="/api/diesel-footprint"){
-      return loadDieselFootprint().then(data=>{res.set("Cache-Control","no-store");res.json(data);}).catch(e=>res.status(500).json({error:String(e?.message||e)}));
-    }
-    const send=res.send.bind(res);
-    res.send=function(body){return send(patchHtml(body));};
-    next();
-  });
-  return app;
-}
-Object.assign(wrappedExpress,previousExpress);
-require.cache[expressPath].exports=wrappedExpress;
-
-module.exports={pct,detectShockAnchor,buildTimeline,classify,loadDieselFootprint};
-+f(w.price,2)+'</div><div class="gnDfMeta">5D '+p(w.chg5dPct)+'</div></div>';
+ '<div class="gnDfCard"><div class="gnDfLabel">WTI</div><div class="gnDfValue">'+f(w.price,2)+'</div><div class="gnDfMeta">5D '+p(w.chg5dPct)+'</div></div>';
  t.innerHTML=(d.timeline||[]).map(function(x){return '<div class="gnDfRow"><div><div class="gnDfLag">'+esc(x.lag)+'</div><div class="gnDfWindow">'+esc(x.window)+'</div></div><div class="gnDfPath"><div><b>미국지표</b>'+esc(x.macro)+'</div><div><b>신용/차환</b>'+esc(x.credit)+'</div><div><b>시장반응</b>'+esc(x.market)+'</div></div></div>'}).join('');
  pe.innerHTML=(d.policyEvents||[]).map(function(x){var days=Math.ceil((new Date(x.date+'T00:00:00Z').getTime()-Date.now())/86400000);var when=days>0?'D-'+days:(days===0?'오늘':'경과');return '<div class="gnDfRow"><div><div class="gnDfLag">'+esc(x.date)+'</div><div class="gnDfWindow">'+esc(when)+'</div></div><div class="gnDfPath"><div><b>이벤트</b>'+esc(x.label)+'</div><div><b>확인</b>'+esc(x.watch)+'</div><div><b>판정</b>선거 결과 자체가 아니라 금리·HY·AI·에너지 가격 반응 확인</div></div></div>'}).join('');
  var wall=d.maturityWall||[],peak=Math.max.apply(null,wall.map(function(x){return Number(x.totalBn)||0}));
- mw.innerHTML=wall.map(function(x){return '<div class="gnMwCard '+(Number(x.totalBn)===peak?'peak':'')+'"><div class="gnMwYear">'+esc(x.year)+'</div><div class="gnMwTotal">
-
-function patchHtml(html){
-  if(typeof html!=="string"||!html.includes("GN PIVOT")||html.includes("gnDieselFootprint"))return html;
-  let out=html.replace("</head>",STYLE+"</head>");
-  if(out.includes('<div class="tabs">'))out=out.replace('<div class="tabs">',PANEL+'<div class="tabs">');
-  else if(out.includes("</header>"))out=out.replace("</header>","</header>"+PANEL);
-  else out=out.replace("</body>",PANEL+"</body>");
-  return out.replace("</body>",SCRIPT+"</body>");
-}
-function wrappedExpress(...args){
-  const app=previousExpress(...args);
-  app.use((req,res,next)=>{
-    if(req.path==="/api/diesel-footprint"){
-      return loadDieselFootprint().then(data=>{res.set("Cache-Control","no-store");res.json(data);}).catch(e=>res.status(500).json({error:String(e?.message||e)}));
-    }
-    const send=res.send.bind(res);
-    res.send=function(body){return send(patchHtml(body));};
-    next();
-  });
-  return app;
-}
-Object.assign(wrappedExpress,previousExpress);
-require.cache[expressPath].exports=wrappedExpress;
-
-module.exports={pct,detectShockAnchor,buildTimeline,classify,loadDieselFootprint};
-+f(Number(x.totalBn)/1000,2)+'T</div><div class="gnMwSpec">비금융 투기등급 
-
-function patchHtml(html){
-  if(typeof html!=="string"||!html.includes("GN PIVOT")||html.includes("gnDieselFootprint"))return html;
-  let out=html.replace("</head>",STYLE+"</head>");
-  if(out.includes('<div class="tabs">'))out=out.replace('<div class="tabs">',PANEL+'<div class="tabs">');
-  else if(out.includes("</header>"))out=out.replace("</header>","</header>"+PANEL);
-  else out=out.replace("</body>",PANEL+"</body>");
-  return out.replace("</body>",SCRIPT+"</body>");
-}
-function wrappedExpress(...args){
-  const app=previousExpress(...args);
-  app.use((req,res,next)=>{
-    if(req.path==="/api/diesel-footprint"){
-      return loadDieselFootprint().then(data=>{res.set("Cache-Control","no-store");res.json(data);}).catch(e=>res.status(500).json({error:String(e?.message||e)}));
-    }
-    const send=res.send.bind(res);
-    res.send=function(body){return send(patchHtml(body));};
-    next();
-  });
-  return app;
-}
-Object.assign(wrappedExpress,previousExpress);
-require.cache[expressPath].exports=wrappedExpress;
-
-module.exports={pct,detectShockAnchor,buildTimeline,classify,loadDieselFootprint};
-+f(x.specNonfinBn,0)+'B</div></div>'}).join('');
+ mw.innerHTML=wall.map(function(x){return '<div class="gnMwCard '+(Number(x.totalBn)===peak?'peak':'')+'"><div class="gnMwYear">'+esc(x.year)+'</div><div class="gnMwTotal">'+f(Number(x.totalBn)/1000,2)+'T</div><div class="gnMwSpec">비금융 투기등급 '+f(x.specNonfinBn,0)+'B</div></div>'}).join('');
  var anchor=d.anchor||{};note.innerHTML='<b>시계월 기준:</b> '+esc(anchor.detected?'디젤 충격 감지일 '+String(anchor.date||'').slice(0,10):'강한 신규 충격 미검출 · 현재월 감시 기준')+' · <b>신용:</b> '+esc(cr.reason||'확인 중')+'<br>'+esc(d.hypothesis||'')+'<br>회사채 만기벽: S&P Global Ratings 최신 미국 스케줄(3·5년물 포함 전체 rated bonds/loans/revolvers). 차환으로 만기 분포는 이동할 수 있음.'+(d.errors&&d.errors.length?'<br><span class="gnDfErr">부분 데이터: '+esc(d.errors.join(' | '))+'</span>':'');
 }
 async function load(){try{var res=await fetch('/api/diesel-footprint?t='+Date.now(),{cache:'no-store'});if(res.status===401){location.href='/login';return}if(!res.ok)throw Error('HTTP '+res.status);render(await res.json())}catch(e){var s=document.getElementById('gnDfState'),n=document.getElementById('gnDfNote');if(s){s.className='gnDfState yellow';s.textContent='데이터 재연결'}if(n)n.textContent='디젤·신용 데이터 재조회 중'}}load();setInterval(load,60000);
