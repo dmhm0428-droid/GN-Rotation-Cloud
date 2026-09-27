@@ -3,9 +3,9 @@ const expressPath=require.resolve("express");
 const previousExpress=require("express");
 
 const RESCUE=`<style id="gn-black-screen-rescue-v1">
-html,body{visibility:visible!important;opacity:1!important;min-height:100%!important}
+html,body{visibility:visible!important;opacity:1!important;min-height:100%!important;height:auto!important;overflow-y:auto!important}
 body{display:block!important;overflow-x:hidden!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;touch-action:pan-y!important}
-.wrap,#gnRoot,#app,main{visibility:visible!important;opacity:1!important;pointer-events:auto!important}.tabs,.tab,button,a,details,summary{pointer-events:auto!important;touch-action:manipulation!important}.tabs{overflow-x:auto!important;-webkit-overflow-scrolling:touch!important}
+.wrap,#gnRoot,#app,main{visibility:visible!important;opacity:1!important;pointer-events:auto!important}.tabs,.tab,button,a,details,summary{pointer-events:auto!important;touch-action:manipulation!important}.tabs{overflow-x:auto!important;-webkit-overflow-scrolling:touch!important;touch-action:auto!important}.tabs .tab{touch-action:auto!important}
 </style>
 <script id="gn-black-screen-rescue-runtime-v1">(function(){
 function rescue(){
