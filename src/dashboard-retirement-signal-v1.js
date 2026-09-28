@@ -128,7 +128,7 @@ function patchHtml(html){
   if(out.includes(marker))out=out.replace(marker,PANEL+marker);
   else if(out.includes('<div class="tabs">'))out=out.replace('<div class="tabs">',PANEL+'<div class="tabs">');
   else out=out.replace("</body>",PANEL+"</body>");
-  return out.replace("</body>",SCRIPT+"</body>");
+  return out.replace("</body>",()=>SCRIPT+"</body>");
 }
 function wrappedExpress(...args){
   const app=previousExpress(...args);
