@@ -112,7 +112,7 @@ function patchHtml(html){
   if(typeof html!=="string"||!html.includes("GN PIVOT")||html.includes("gn-private-credit-quality-v1"))return html;
   let out=html;
   if(out.includes("</head>"))out=out.replace("</head>",STYLE+"</head>");
-  return out.replace("</body>",SCRIPT+"</body>");
+  return out.replace("</body>",()=>SCRIPT+"</body>");
 }
 function wrappedExpress(...args){
   const app=previousExpress(...args);
