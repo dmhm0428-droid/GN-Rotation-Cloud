@@ -49,10 +49,10 @@ function cashFromTimeseries(data,source,now=Date.now()){
 }
 let yahooSession;
 async function yahooTrend(symbol){
- if(!yahooSession)yahooSession=(async()=>{const r=await fetch('https://fc.yahoo.com',{signal:AbortSignal.timeout(10000)});const cookie=r.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');const c=await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb',{headers:{cookie,'user-agent':'Mozilla/5.0'},signal:AbortSignal.timeout(10000)});if(!c.ok)throw Error('YAHOO_SESSION_UNAVAILABLE');const crumb=await c.text();return {cookie,crumb};})().catch(e=>{yahooSession=null;throw e;});
+ if(!yahooSession)yahooSession=(async()=>{const r=await fetch('https://fc.yahoo.com',{headers:{'user-agent':'Mozilla/5.0'},signal:AbortSignal.timeout(10000)});const cookie=r.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');const c=await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb',{headers:{cookie,'user-agent':'Mozilla/5.0'},signal:AbortSignal.timeout(10000)});if(!c.ok)throw Error('YAHOO_SESSION_UNAVAILABLE');const crumb=await c.text();return {cookie,crumb};})().catch(e=>{yahooSession=null;throw e;});
  const {cookie,crumb}=await yahooSession;
- const u='https://query1.finance.yahoo.com/v10/finance/quoteSummary/'+encodeURIComponent(symbol)+'?modules=earningsTrend&crumb='+encodeURIComponent(crumb);
- const data=await json(u,{cookie});const trend=data?.quoteSummary?.result?.[0]?.earningsTrend?.trend;
+ const u='https://query2.finance.yahoo.com/v10/finance/quoteSummary/'+encodeURIComponent(symbol)+'?modules=earningsTrend&crumb='+encodeURIComponent(crumb);
+ const data=await json(u,{cookie,'user-agent':'Mozilla/5.0'});const trend=data?.quoteSummary?.result?.[0]?.earningsTrend?.trend;
  if(!Array.isArray(trend))throw Error('EPS_TREND_UNAVAILABLE');return trend;
 }
 async function collectSymbol(symbol,now=Date.now()){
