@@ -65,10 +65,24 @@ async function collectSymbol(symbol,now=Date.now()){
  ]);
  return {symbol,observed_at:new Date(now).toISOString(),checks,errors};
 }
+function verifiedSnapshotEstimates(snapshot,symbol,now=Date.now()){
+ if(snapshot?.schema_version!==1||snapshot?.collection_path!=='GITHUB_ACTIONS_PUBLIC_SOURCE')return null;
+ const row=snapshot.items?.find(x=>x.symbol===symbol),e=row?.checks?.estimates;
+ const date=Date.parse(row?.observed_at),source='https://finance.yahoo.com/quote/'+symbol+'/analysis/';
+ if(!Number.isFinite(date)||date>now+300000||now-date>2*3600000||e?.verified!==true||!['PASS','FAIL'].includes(e.status)||!e.sources?.includes(source))return null;
+ // Recompute the fixed EPS rule from raw dated observations instead of trusting a stored PASS.
+ const trend=(e.metrics?.forecasts||[]).map(x=>({period:x.period,endDate:x.end_date,epsTrend:{current:x.eps,'30daysAgo':x.eps_30d,'90daysAgo':x.eps_90d},earningsEstimate:{numberOfAnalysts:x.analysts}}));
+ const computed=estimatesFromTrend(trend,source,date);if(!computed.verified)return null;
+ return {...computed,collection_path:'GITHUB_ACTIONS_PUBLIC_SOURCE',retrieved_at:new Date(now).toISOString()};
+}
+async function snapshotFallback(symbol,now){
+ const u='https://raw.githubusercontent.com/dmhm0428-droid/GN-Rotation-Cloud/gn-verified-data/gn-fundamentals.json';
+ try{return verifiedSnapshotEstimates(await json(u),symbol,now);}catch{return null;}
+}
 function createFundamentalService(db,collector=collectSymbol,clock=Date.now){
  const cache=new Map();let pending=null,lastRun=0,storageRetry=0,storageStatus='CONNECTING',lastRead=0;
  async function refresh(){if(pending)return pending;const retryInterval=[...cache.values()].some(x=>x.errors?.length)?300000:3600000;if(lastRun&&clock()-lastRun<retryInterval)return;lastRun=clock();
-  pending=(async()=>{await Promise.all(WATCH.map(async symbol=>{const payload=await collector(symbol,clock());cache.set(symbol,payload);if(clock()<storageRetry)return;try{const {error}=await db.from('gn_fundamental_snapshots').insert({symbol,observed_at:payload.observed_at,payload});if(error)throw error;storageStatus='AVAILABLE';}catch{storageStatus='UNAVAILABLE';storageRetry=clock()+3600000;}}));})().finally(()=>{pending=null;});return pending;
+  pending=(async()=>{await Promise.all(WATCH.map(async symbol=>{const payload=await collector(symbol,clock());if(payload.errors?.some(x=>x.startsWith('EPS_'))){const fallback=await snapshotFallback(symbol,clock());if(fallback){payload.checks.estimates=fallback;payload.errors=payload.errors.filter(x=>!x.startsWith('EPS_'));}}cache.set(symbol,payload);if(clock()<storageRetry)return;try{const {error}=await db.from('gn_fundamental_snapshots').insert({symbol,observed_at:payload.observed_at,payload});if(error)throw error;storageStatus='AVAILABLE';}catch{storageStatus='UNAVAILABLE';storageRetry=clock()+3600000;}}));})().finally(()=>{pending=null;});return pending;
  }
  async function read(){if(clock()>=storageRetry&&clock()-lastRead>=300000){lastRead=clock();try{const {data,error}=await db.from('gn_fundamental_snapshots').select('symbol,observed_at,payload').in('symbol',WATCH).order('observed_at',{ascending:false}).limit(24);if(error)throw error;const seen=new Set();for(const x of data||[]){if(seen.has(x.symbol))continue;seen.add(x.symbol);const p=cache.get(x.symbol);if(!p||Date.parse(x.observed_at)>Date.parse(p.observed_at))cache.set(x.symbol,x.payload);}storageStatus='AVAILABLE';}catch{storageStatus='UNAVAILABLE';storageRetry=clock()+3600000;}}
   void refresh().catch(()=>{});return {items:[...cache.values()],ts:new Date(clock()).toISOString(),storage_status:storageStatus,mode:'DIRECT_PROVIDER_CACHE',refresh_interval_minutes:[...cache.values()].some(x=>x.errors?.length)?5:60};
@@ -84,4 +98,4 @@ function installFundamentals(app,db){
  return service;
 }
 function fundamentalHealth(){return installedService?.health()||{running:false,collected_symbols:0};}
-module.exports={cashFromFacts,cashFromTimeseries,estimatesFromTrend,collectSymbol,installFundamentals,createFundamentalService,fundamentalHealth};
+module.exports={verifiedSnapshotEstimates,cashFromFacts,cashFromTimeseries,estimatesFromTrend,collectSymbol,installFundamentals,createFundamentalService,fundamentalHealth};

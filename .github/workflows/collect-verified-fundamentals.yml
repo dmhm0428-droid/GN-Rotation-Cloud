@@ -1,0 +1,44 @@
+name: Collect public fundamental evidence
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/gn-fundamentals.js'
+      - 'scripts/collect-verified-fundamentals.js'
+      - '.github/workflows/collect-verified-fundamentals.yml'
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: gn-public-fundamentals
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Collect public source data
+        run: node scripts/collect-verified-fundamentals.js /tmp/gn-fundamentals.json
+      - name: Publish dated evidence on the data branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'GN public data collector'
+          git config user.email 'gn-data@users.noreply.github.com'
+          if git fetch origin gn-verified-data; then
+            git checkout -B gn-verified-data FETCH_HEAD
+          else
+            git checkout --orphan gn-verified-data
+            git rm -rf .
+          fi
+          cp /tmp/gn-fundamentals.json gn-fundamentals.json
+          git add gn-fundamentals.json
+          git diff --cached --quiet && exit 0
+          git commit -m 'Refresh dated public fundamental evidence'
+          git push origin HEAD:gn-verified-data
