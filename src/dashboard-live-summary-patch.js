@@ -24,7 +24,7 @@ async function liveSummary(req,res){
  try{
    const cutoff=new Date(Date.now()-30*60*1000).toISOString();
    const settled=await Promise.allSettled([
-     latestPerKey("gn_representatives",r=>r?.sector?`${r.asset_class||"UNKNOWN"}:${r.sector}`:(r?.asset_class||null),800),
+     latestPerKey("gn_latest_representatives",r=>r?.sector?`${r.asset_class||"UNKNOWN"}:${r.sector}`:(r?.asset_class||null),80),
      latestPerKey("gn_asset_flow_scores",r=>r?.asset_class||null,240),
      latestPerKey("gn_sector_flow_scores",r=>`${r?.asset_class||"STOCK"}:${r?.sector||""}`,800),
      timeout(db.from("gn_pre_pump_snapshots").select("*").gte("ts",cutoff).order("score",{ascending:false}).limit(100),5000),
@@ -50,5 +50,8 @@ async function liveSummary(req,res){
 }
 const SCRIPT=`<script id="gn-live-summary-v9">(function(){async function load(){try{var r=await fetch('/api/live-summary?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);var d=await r.json();var u=document.getElementById('updated');if(u)u.textContent=(d.degraded?'부분 데이터 · ':'실시간 검증 · ')+new Date(d.ts).toLocaleTimeString()+' · 15초 자동';}catch(e){var u=document.getElementById('updated');if(u)u.textContent='라이브 재조회 중 · '+new Date().toLocaleTimeString()}}setTimeout(load,300);setInterval(load,15000);window.gnLiveSummary=load;})();</script>`;
 function patchHtml(html){if(typeof html!=="string"||!html.includes("<title>GN PIVOT</title>")||html.includes("gn-live-summary-v9"))return html;return html.replace("</body>",SCRIPT+"</body>");}
-function wrappedExpress(...args){const app=previousExpress(...args);app.get("/api/live-summary",liveSummary);app.use((req,res,next)=>{const send=res.send.bind(res);res.send=function(body){return send(patchHtml(body))};next()});return app;}
+let summaryCache=null,summaryPending=null;
+async function cachedLiveSummary(req,res){res.set("Cache-Control","no-store");if(summaryCache&&Date.now()-summaryCache.at<60000)return res.json(summaryCache.payload);if(!summaryPending){const sink={set(){return this;},status(){return this;},json(payload){summaryCache={at:Date.now(),payload};return payload;}};summaryPending=liveSummary(req,sink).finally(()=>{summaryPending=null;});}await summaryPending;return res.json(summaryCache?.payload||{degraded:true,reps:[],assets:[],sectors:[],warnings:["SUMMARY_UNAVAILABLE"]});}
+function wrappedExpress(...args){const app=previousExpress(...args);app.get("/api/live-summary",cachedLiveSummary);app.use((req,res,next)=>{const send=res.send.bind(res);res.send=function(body){return send(patchHtml(body))};next()});return app;}
 Object.assign(wrappedExpress,previousExpress);require.cache[expressPath].exports=wrappedExpress;
+
