@@ -1,13 +1,14 @@
-name: Collect public fundamental evidence
+name: Discover market candidates
 on:
   push:
     branches: [main]
     paths:
-      - 'src/gn-fundamentals.js'
-      - 'scripts/collect-verified-fundamentals.js'
-      - '.github/workflows/collect-verified-fundamentals.yml'
+      - 'src/gn-market-discovery.js'
+      - 'src/gn-live-verification.js'
+      - 'scripts/collect-market-candidates.js'
+      - '.github/workflows/collect-market-candidates.yml'
   schedule:
-    - cron: '17 * * * *'
+    - cron: '27 * * * *'
   workflow_dispatch:
 permissions:
   contents: write
@@ -17,14 +18,14 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Collect public source data
-        run: node scripts/collect-verified-fundamentals.js /tmp/gn-fundamentals.json
+        run: node scripts/collect-market-candidates.js /tmp/gn-market-candidates.json
       - name: Publish dated evidence on the data branch
         shell: bash
         run: |
@@ -37,8 +38,8 @@ jobs:
             git checkout --orphan gn-verified-data
             git rm -rf .
           fi
-          cp /tmp/gn-fundamentals.json gn-fundamentals.json
-          git add gn-fundamentals.json
+          cp /tmp/gn-market-candidates.json gn-market-candidates.json
+          git add gn-market-candidates.json
           git diff --cached --quiet && exit 0
-          git commit -m 'Refresh dated public fundamental evidence'
+          git commit -m 'Refresh market discovery and dated candidate evidence'
           git push origin HEAD:gn-verified-data

@@ -57,11 +57,11 @@ async function yahooTrend(symbol){
  const data=await json(u,{cookie,'user-agent':'Mozilla/5.0'});const trend=data?.quoteSummary?.result?.[0]?.earningsTrend?.trend;
  if(!Array.isArray(trend))throw Error('EPS_TREND_UNAVAILABLE');return trend;
 }
-async function collectSymbol(symbol,now=Date.now()){
+async function collectSymbol(symbol,now=Date.now(),ciks=CIK){
  const checks={estimates:unknown('EPS 조회 대기',now),cashflow:unknown('국내 공시 현금흐름 수집원 미연결',now)};const errors=[];
  await Promise.all([
   (async()=>{try{checks.estimates=estimatesFromTrend(await yahooTrend(symbol),'https://finance.yahoo.com/quote/'+symbol+'/analysis/',now);}catch(e){yahooSession=null;const code=/^HTTP [0-9]{3}$/.test(e.message)?'EPS_HTTP_'+e.message.slice(-3):/^EPS_SESSION_HTTP_[0-9]{3}$/.test(e.message)?e.message:['TimeoutError','AbortError'].includes(e.name)?'EPS_TIMEOUT':e.message==='EPS_TREND_UNAVAILABLE'?'EPS_TREND_UNAVAILABLE':'EPS_CONNECTION_FAILED';checks.estimates=unknown('EPS 제공처 조회 실패 ('+code+') · 5분 후 재조회',now);errors.push(code);}})(),
-  (async()=>{if(!CIK[symbol]){const u='https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/'+encodeURIComponent(symbol)+'?type=quarterlyOperatingCashFlow,quarterlyCapitalExpenditure,quarterlyStockBasedCompensation&period1='+Math.floor((now-3*365*day)/1000)+'&period2='+Math.floor(now/1000);try{checks.cashflow=cashFromTimeseries(await json(u),'https://finance.yahoo.com/quote/'+symbol+'/cash-flow/',now);}catch{checks.cashflow=unknown('국내 현금흐름 제공처 접근 실패 · 자동 재조회 예정',now);errors.push('KR_CASHFLOW_UNAVAILABLE');}return;}const u='https://data.sec.gov/api/xbrl/companyfacts/CIK'+CIK[symbol]+'.json';try{checks.cashflow=cashFromFacts(await json(u),u,now);}catch{checks.cashflow=unknown('SEC 공시 조회 실패 · 자동 재조회 예정',now);errors.push('SEC_UNAVAILABLE');}})()
+  (async()=>{if(!ciks[symbol]){if(!/\.K[QS]$/.test(symbol)){checks.cashflow=unknown('미국 상장 기업의 원공시 식별정보 미연결',now);return;}const u='https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/'+encodeURIComponent(symbol)+'?type=quarterlyOperatingCashFlow,quarterlyCapitalExpenditure,quarterlyStockBasedCompensation&period1='+Math.floor((now-3*365*day)/1000)+'&period2='+Math.floor(now/1000);try{checks.cashflow=cashFromTimeseries(await json(u),'https://finance.yahoo.com/quote/'+symbol+'/cash-flow/',now);}catch{checks.cashflow=unknown('국내 현금흐름 제공처 접근 실패 · 자동 재조회 예정',now);errors.push('KR_CASHFLOW_UNAVAILABLE');}return;}const u='https://data.sec.gov/api/xbrl/companyfacts/CIK'+ciks[symbol]+'.json';try{checks.cashflow=cashFromFacts(await json(u),u,now);}catch{checks.cashflow=unknown('SEC 공시 조회 실패 · 자동 재조회 예정',now);errors.push('SEC_UNAVAILABLE');}})()
  ]);
  return {symbol,observed_at:new Date(now).toISOString(),checks,errors};
 }

@@ -22,7 +22,7 @@ function auth(req,res,next){if(isAuthed(req))return next();if(req.path.startsWit
 function loginPage(error=""){return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GN PIVOT 로그인</title><style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#080a0d;color:#eef2f6;font-family:system-ui,-apple-system,sans-serif;padding:24px}.box{width:min(100%,390px);background:#12171d;border:1px solid #303946;border-radius:18px;padding:24px}h1{margin:0 0 6px;font-size:26px}.sub{color:#99a5b1;font-size:14px;margin-bottom:22px}label{display:block;font-size:13px;color:#b7c1cb;margin:12px 0 6px}input{width:100%;font-size:16px;padding:14px 13px;border-radius:11px;border:1px solid #3a4654;background:#0d1116;color:#fff}button{width:100%;margin-top:18px;padding:14px;border:0;border-radius:11px;background:#2f7cf6;color:#fff;font-size:16px;font-weight:800}.err{background:#3a171b;color:#ff9aa3;border:1px solid #6b272f;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:12px}</style></head><body><form class="box" method="post" action="/login"><h1>GN PIVOT</h1><div class="sub">투자비서 대시보드</div>${error?`<div class="err">${error}</div>`:""}<label>아이디</label><input name="username" autocomplete="username" required><label>비밀번호</label><input name="password" type="password" autocomplete="current-password" required><button type="submit">로그인</button></form></body></html>`;}
 
 app.use(express.urlencoded({extended:false}));
-app.get("/health/data",(req,res)=>res.json({fundamentals:require("./gn-fundamentals").fundamentalHealth(),market:require("./gn-live-verification").verificationHealth()}));
+app.get("/health/data",(req,res)=>res.json({fundamentals:require("./gn-fundamentals").fundamentalHealth(),market:require("./gn-live-verification").verificationHealth(),discovery:require("./gn-market-discovery").discoveryHealth()}));
 app.get("/health",(req,res)=>res.json({ok:true,time:new Date().toISOString(),mode:"INVESTMENT_ASSISTANT"}));
 app.get("/login",(req,res)=>isAuthed(req)?res.redirect("/"):res.type("html").end(loginPage()));
 app.post("/login",(req,res)=>{const u=String(req.body?.username||"");const p=String(req.body?.password||"");if(u!==USER||p!==PASS)return res.status(401).type("html").end(loginPage("아이디 또는 비밀번호가 맞지 않습니다."));const secure=(req.headers["x-forwarded-proto"]||req.protocol)==="https";res.setHeader("Set-Cookie",`${COOKIE_NAME}=${encodeURIComponent(authToken())}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure?"; Secure":""}`);return res.redirect("/");});
@@ -30,6 +30,7 @@ app.get("/logout",(req,res)=>{res.setHeader("Set-Cookie",`${COOKIE_NAME}=; Path=
 app.use(auth);app.use(express.json());
 require("./gn-fundamentals").installFundamentals(app,db);
 require("./gn-live-verification").installVerification(app);
+require("./gn-market-discovery").installDiscovery(app);
 
 const AI_PROVIDERS=["perplexity","xai","deepseek","anthropic","gemini"];
 const clamp=(x,a=0,b=100)=>Math.max(a,Math.min(b,x));

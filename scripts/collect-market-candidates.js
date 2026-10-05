@@ -1,0 +1,26 @@
+'use strict';
+const fs=require('node:fs');
+const {COLUMNS,parseCsv,normalizeRows,prioritize}=require('../src/gn-market-discovery');
+const {chartEvidence,relativeStrength}=require('../src/gn-live-verification');
+const {collectSymbol}=require('../src/gn-fundamentals');
+const ROOT='https://raw.githubusercontent.com/dmhm0428-droid/GN-Rotation-Cloud/gn-verified-data/';
+async function request(url,json=true,body){let last;for(let i=0;i<2;i++){try{const r=await fetch(url,{method:body?'POST':'GET',headers:{'user-agent':url.startsWith('https://data.sec.gov')?'GN-PIVOT/1.0 (+https://gn-rotation-cloud-8b0z.onrender.com)':'Mozilla/5.0','content-type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(20000)});if(!r.ok)throw Error('HTTP_'+r.status);return json?r.json():r.text();}catch(e){last=e;if(e.message==='HTTP_429'||e.message==='HTTP_401'||e.message==='HTTP_403')break;}}throw last;}
+async function chart(symbol){return chartEvidence(await request('https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(symbol)+'?interval=1d&range=1y'),symbol);}
+async function listing(){const now=Date.now();for(let d=0;d<7;d++){const date=new Date(now-d*86400000).toISOString().slice(0,10),source='https://raw.githubusercontent.com/FinanceData/fdr_krx_data_cache/master/data/listing/krx/'+date+'.csv';try{const rows=parseCsv(await request(source,false));if(rows.length>1000)return {rows,date,source};}catch{}}throw Error('KR_LISTING_UNAVAILABLE');}
+async function scan(market){const rows=[],page=5000;let total=0;for(let start=0;start<25000;start+=page){const x=await request('https://scanner.tradingview.com/'+market+'/scan',true,{filter:[{left:'type',operation:'equal',right:'stock'}],columns:COLUMNS,sort:{sortBy:'name',sortOrder:'asc'},range:[start,start+page]});if(!Number.isInteger(x.totalCount)||!Array.isArray(x.data))throw Error('SCAN_FORMAT');total=x.totalCount;rows.push(...x.data);if(rows.length>=total||!x.data.length)break;}return {data:rows,totalCount:total,complete:rows.length>=total};}
+(async()=>{
+ const [kr,usScan,krScan]=await Promise.all([listing(),scan('america'),scan('korea')]);
+ const universes={us:normalizeRows(usScan,'us'),kr:normalizeRows(krScan,'kr',kr.rows)},coverage={},selected=[];
+ for(const kind of ['us','kr']){const u=universes[kind],p=prioritize(u,24),source=kind==='us'?usScan:krScan;coverage[kind]={discovered:u.length,comparable:u.filter(x=>x.screen_return_1m!==null&&x.screen_return_3m!==null).length,deep_checked:0,source_rows:source.data.length,source_total:source.totalCount,listing_complete:source.complete,scope:kind==='us'?'NASDAQ·NYSE·AMEX 보통주·DR (OTC·우선주 제외)':'KRX 보통주 · KOSPI·KOSDAQ',source:'https://scanner.tradingview.com/'+(kind==='us'?'america':'korea')+'/scan',listing_source:kind==='kr'?kr.source:null,listing_date:kind==='kr'?kr.date:null};selected.push(...p);}
+ console.log(JSON.stringify({stage:'UNIVERSE_DISCOVERED',coverage}));
+ const benchmarks=new Map();for(const symbol of ['SPY','^KS11','^KQ11'])try{benchmarks.set(symbol,await chart(symbol));}catch{}
+ let ciks={VRT:'0001674101',GEV:'0001996810'};try{const j=await request('https://www.sec.gov/files/company_tickers.json');for(const x of Object.values(j))if(x.ticker&&x.cik_str)ciks[x.ticker.replace(/\./g,'-')]=String(x.cik_str).padStart(10,'0');}catch{}
+ const items=[];
+ for(const row of selected){let live_verification={symbol:row.symbol,price_verified:false,chart_verified:false,error:'조회 실패'};try{live_verification=await chart(row.symbol);const b=benchmarks.get(row.benchmark);if(b)live_verification.relative_strength=relativeStrength(live_verification,b);}catch{}
+  const f=await collectSymbol(row.symbol,Date.now(),ciks);
+  items.push({...row,live_verification,fundamentals:f});coverage[row.kind].deep_checked++;if(items.length%8===0)console.log(JSON.stringify({stage:'CANDIDATE_EVIDENCE',checked:items.length,planned:selected.length}));}
+ for(const kind of ['us','kr']){const a=items.filter(x=>x.kind===kind);coverage[kind].verified_eps=a.filter(x=>x.fundamentals.checks.estimates.verified).length;coverage[kind].verified_charts=a.filter(x=>x.live_verification.chart_verified).length;coverage[kind].verified_cashflow=a.filter(x=>x.fundamentals.checks.cashflow.metrics?.ocf_ttm!==null&&x.fundamentals.checks.cashflow.metrics?.ocf_ttm!==undefined).length;}
+ const snapshot={schema_version:1,collection_path:'GITHUB_ACTIONS_MARKET_DISCOVERY',published_at:new Date().toISOString(),coverage,items,rule_verdict:'INCOMPLETE',refresh_interval_minutes:60,priority_note:'1·3개월 수익률 순위로 업종별 조회 순서를 정합니다. 이 순위는 주도주·매수 판정이 아닙니다.'};
+ try{const prior=await request(ROOT+'gn-market-candidates.json');const before=new Set(prior.items.map(x=>x.symbol)),after=new Set(items.map(x=>x.symbol));snapshot.candidate_changes={previous_at:prior.published_at,added:[...after].filter(s=>!before.has(s)),removed:[...before].filter(s=>!after.has(s))};}catch{snapshot.candidate_changes={previous_at:null,added:items.map(x=>x.symbol),removed:[]};}
+ fs.writeFileSync(process.argv[2]||'/tmp/gn-market-candidates.json',JSON.stringify(snapshot));console.log(JSON.stringify({published_at:snapshot.published_at,coverage}));
+})().catch(e=>{console.error('MARKET_COLLECTION_FAILED',/^([A-Z_0-9]+)$/.test(e.message)?e.message:'CONNECTION_ERROR');process.exit(1);});
