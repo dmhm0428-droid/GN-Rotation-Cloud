@@ -7,7 +7,10 @@ function patchHtml(html){
  if(typeof html!=="string"||!html.includes("GN PIVOT")||!html.includes('id="tabBody"')||html.includes('id="gn-framework-navigation-v1"'))return html;
  // A replacement string interprets $' in the USD label as a substitution token.
  // Use a callback to preserve the injected JavaScript byte for byte.
- return html.replace("</body>",()=>STYLE+'<script id="gn-framework-navigation-v1">'+CLIENT_JS+'</script></body>');
+ // The canonical results screen owns polling. Hidden legacy renderers otherwise
+ // keep downloading historical DB rows and exhaust the same quota again.
+ const clean=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,'');
+ return clean.replace("</body>",()=>STYLE+'<script id="gn-framework-navigation-v1">'+CLIENT_JS+'</script></body>');
 }
 function install(){const expressPath=require.resolve("express");const previousExpress=require("express");
  function wrappedExpress(...args){const app=previousExpress(...args);app.use((req,res,next)=>{const send=res.send.bind(res);res.send=function(body){return send(req.path==="/"?patchHtml(body):body);};next();});return app;}

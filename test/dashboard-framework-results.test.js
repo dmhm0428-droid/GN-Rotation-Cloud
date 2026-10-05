@@ -5,7 +5,7 @@ const {patchHtml,CLIENT_JS}=require('../src/dashboard-framework-navigation-v1');
 const {createFrameworkPolicy}=require('../src/gn-framework-screen-policy');
 test('result screen preserves existing live DOM without the document dump',()=>{
  const original='<title>GN PIVOT</title><body><div id="tabBody"></div><script>window.refreshGN=()=>1;</script></body>';
- const actual=patchHtml(original);assert.ok(actual.includes(original.replace('</body>','')));assert.equal(patchHtml(actual),actual);assert.doesNotThrow(()=>new Function(CLIENT_JS));assert.ok(!CLIENT_JS.includes('사진의 역사 비교'));assert.ok(CLIENT_JS.includes('/api/live-summary'));assert.ok(CLIENT_JS.includes('검증 통과 종목'));
+ const actual=patchHtml(original);assert.ok(actual.includes('id="tabBody"'));assert.ok(!actual.includes('window.refreshGN=()=>1'));assert.equal(patchHtml(actual),actual);assert.doesNotThrow(()=>new Function(CLIENT_JS));assert.ok(!CLIENT_JS.includes('사진의 역사 비교'));assert.ok(CLIENT_JS.includes('/api/live-summary'));assert.ok(CLIENT_JS.includes('검증 통과 종목'));
 });
 const P=createFrameworkPolicy(),now=Date.now(),valid=()=>({verified:true,status:'PASS',sources:['official evidence'],observed_at:new Date(now-1000).toISOString(),valid_until:new Date(now+60000).toISOString()});
 function complete(){const gates=Object.fromEntries(P.STAGES.map(([k])=>[k,valid()]));gates.company_quality.checks=Object.fromEntries(P.QUALITY.map(([k])=>[k,valid()]));Object.assign(gates.execution,{buy_krw:100,invalidation_krw:90,recovery_krw:120,review_at:new Date(now+60000).toISOString()});return {kind:'us',price:100,components:{gn_framework:gates}};}

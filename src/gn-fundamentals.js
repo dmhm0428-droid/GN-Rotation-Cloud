@@ -47,8 +47,10 @@ function cashFromTimeseries(data,source,now=Date.now()){
  // Aggregated data needs a filing cross-check, not an automatic primary-source pass.
  return evidence('UNKNOWN',current===null?'국내 분기 현금흐름 8개 비교 자료 부족':'국내 현금흐름 비교 수집 · 원공시·운전자본 대조 필요',[source],now,{metrics});
 }
-let yahooSession;
+let yahooSession,yahooSessionAt=0;
 async function yahooTrend(symbol){
+ if(yahooSession&&Date.now()-yahooSessionAt>30*60000)yahooSession=null;
+ if(!yahooSession)yahooSessionAt=Date.now();
  if(!yahooSession)yahooSession=(async()=>{const r=await fetch('https://fc.yahoo.com',{headers:{'user-agent':'Mozilla/5.0'},signal:AbortSignal.timeout(10000)});const cookie=r.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');const c=await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb',{headers:{cookie,'user-agent':'Mozilla/5.0'},signal:AbortSignal.timeout(10000)});if(!c.ok)throw Error('YAHOO_SESSION_UNAVAILABLE');const crumb=await c.text();return {cookie,crumb};})().catch(e=>{yahooSession=null;throw e;});
  const {cookie,crumb}=await yahooSession;
  const u='https://query2.finance.yahoo.com/v10/finance/quoteSummary/'+encodeURIComponent(symbol)+'?modules=earningsTrend&crumb='+encodeURIComponent(crumb);
