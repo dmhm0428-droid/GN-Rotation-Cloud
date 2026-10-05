@@ -42,6 +42,7 @@ function runEventLead(){
 // Response wrappers run in reverse preload order. Put final UI post-processors first,
 // then the authoritative renderer, so the post-processors receive its final HTML.
 const preloads=[
+  "dashboard-framework-navigation-v1.js",
   "dashboard-black-screen-rescue-v1.js",
   "dashboard-private-credit-quality-v1.js",
   "dashboard-bank-capacity-treasury-v1.js",
@@ -77,3 +78,4 @@ server.on("exit",code=>process.exit(code??0));
 setTimeout(runAi,5000);setTimeout(runAssistant,12000);setTimeout(runEventLead,18000);
 setInterval(runAi,60*1000).unref();setInterval(runAssistant,60*1000).unref();setInterval(runEventLead,5*60*1000).unref();
 for(const sig of ["SIGTERM","SIGINT"]){process.on(sig,()=>{clearTimeout(retryTimer);clearTimeout(assistantRetryTimer);clearTimeout(eventLeadRetryTimer);if(!server.killed)server.kill(sig);});}
+
