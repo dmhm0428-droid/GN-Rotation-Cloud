@@ -71,7 +71,7 @@ function createFundamentalService(db,collector=collectSymbol,clock=Date.now){
  async function read(){if(clock()>=storageRetry&&clock()-lastRead>=300000){lastRead=clock();try{const {data,error}=await db.from('gn_fundamental_snapshots').select('symbol,observed_at,payload').in('symbol',WATCH).order('observed_at',{ascending:false}).limit(24);if(error)throw error;const seen=new Set();for(const x of data||[]){if(seen.has(x.symbol))continue;seen.add(x.symbol);const p=cache.get(x.symbol);if(!p||Date.parse(x.observed_at)>Date.parse(p.observed_at))cache.set(x.symbol,x.payload);}storageStatus='AVAILABLE';}catch{storageStatus='UNAVAILABLE';storageRetry=clock()+3600000;}}
   void refresh().catch(()=>{});return {items:[...cache.values()],ts:new Date(clock()).toISOString(),storage_status:storageStatus,mode:'DIRECT_PROVIDER_CACHE',refresh_interval_minutes:60};
  }
- function health(){return {storage_status:storageStatus,running:!!pending,last_attempt:lastRun?new Date(lastRun).toISOString():null,collected_symbols:cache.size,verified_cashflow:[...cache.values()].filter(x=>x.checks.cashflow?.sources?.length&&x.checks.cashflow?.metrics?.ocf_ttm!==null&&x.checks.cashflow?.metrics?.ocf_ttm!==undefined).length};}
+ function health(){return {storage_status:storageStatus,running:!!pending,last_attempt:lastRun?new Date(lastRun).toISOString():null,collected_symbols:cache.size,verified_eps:[...cache.values()].filter(x=>x.checks.estimates?.verified===true&&['PASS','FAIL'].includes(x.checks.estimates?.status)).length,verified_cashflow:[...cache.values()].filter(x=>x.checks.cashflow?.sources?.length&&x.checks.cashflow?.metrics?.ocf_ttm!==null&&x.checks.cashflow?.metrics?.ocf_ttm!==undefined).length};}
  return {refresh,read,health};
 }
 let installedService;
