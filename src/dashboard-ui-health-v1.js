@@ -34,7 +34,7 @@ function uiHealth(req,res){
   for(const name of FORBIDDEN)forbidden[name]={preloaded:opts.includes(name)};
   const ok=Object.values(checks).every(x=>x.preloaded&&x.file)&&Object.values(forbidden).every(x=>!x.preloaded);
   res.set("Cache-Control","no-store");
-  return res.status(ok?200:503).json({ok,revision:REVISION,top3SafetyRevision:TOP3_SAFETY_REVISION,canonicalTop3Owner:"dashboard-leading-top3-v2",canonicalDashboardOwner:"dashboard-authoritative-v1",partialLoaderDisabled:true,checks,forbidden,time:new Date().toISOString()});
+  return res.status(ok?200:503).json({ok,revision:REVISION,top3SafetyRevision:TOP3_SAFETY_REVISION,canonicalTop3Owner:"dashboard-leading-top3-v2",canonicalDashboardOwner:"dashboard-authoritative-v1",partialLoaderDisabled:true,buildCommit:process.env.RENDER_GIT_COMMIT||null,frameworkResults:{preloaded:opts.includes("dashboard-framework-navigation-v1.js"),revision:fs.readFileSync(path.resolve(__dirname,"dashboard-framework-navigation-v1.js"),"utf8").includes('replace("</body>",()=>')?"LITERAL_SCRIPT_20261005":"LEGACY"},checks,forbidden,time:new Date().toISOString()});
 }
 
 function wrappedExpress(...args){
