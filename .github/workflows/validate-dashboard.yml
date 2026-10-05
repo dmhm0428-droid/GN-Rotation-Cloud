@@ -84,10 +84,11 @@ jobs:
           grep -q 'Pre-Pump TOP3' /tmp/dashboard.html || { echo 'canonical TOP3 semantics missing'; exit 1; }
           grep -q '/api/risk-buy-fx' /tmp/dashboard.html || { echo 'live risk/buy feed missing'; exit 1; }
           grep -q 'id="gnRetSignal"' /tmp/dashboard.html || { echo 'retirement leading-signal panel missing'; exit 1; }
-          grep -q '/api/retirement-signal' /tmp/dashboard.html || { echo 'retirement leading-signal feed missing'; exit 1; }
+          grep -q '/api/gn-verification' /tmp/dashboard.html || { echo 'direct market verification feed missing'; exit 1; }
           grep -q 'id="grsNews"' /tmp/dashboard.html || { echo 'retirement news-risk verification panel missing'; exit 1; }
           grep -q '뉴스·악재 검증' /tmp/dashboard.html || { echo 'news-risk semantics missing'; exit 1; }
-          grep -q '/api/save-brief' /tmp/dashboard.html || { echo 'SAVE brief feed missing'; exit 1; }
+          grep -q '/api/gn-fundamentals' /tmp/dashboard.html || { echo 'fundamentals verification feed missing'; exit 1; }
+          grep -q 'gn-framework-results-root' /tmp/dashboard.html || { echo 'framework results renderer missing'; exit 1; }
           if grep -q 'gn-final-style-v3' /tmp/dashboard.html; then echo 'conflicting final full-body renderer unexpectedly active'; exit 1; fi
           if grep -q 'gn-partial-loading-v1' /tmp/dashboard.html; then echo 'broken partial loader unexpectedly active'; exit 1; fi
 
@@ -130,3 +131,4 @@ jobs:
           fi
           echo "::warning::Render is reachable but not yet serving the new canonical revision."
           exit 1
+

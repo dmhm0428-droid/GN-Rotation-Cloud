@@ -35,7 +35,7 @@ function estimatesFromTrend(trend,source,now=Date.now()){
  // Annual consensus is not a rolling 12-month estimate: retain that distinction.
  return evidence(!ready?'UNKNOWN':raised?'PASS':'FAIL',!ready?'동일 전망기간의 현재·30일·90일 EPS 자료 부족':raised?'다음 분기·다음 회계연도 EPS 모두 30일·90일 전보다 상향':'다음 분기·회계연도 EPS 상향 조건 미충족',[source],now,{metrics:{forecasts:rows,annual_basis:'NEXT_FISCAL_YEAR_NOT_ROLLING_NTM'}});
 }
-async function json(url,headers={}){const r=await fetch(url,{headers:{'user-agent':url.startsWith('https://data.sec.gov/')?'GN-PIVOT/1.0 (+https://gn-rotation-cloud-8b0z.onrender.com)':'Mozilla/5.0 GN-PIVOT/1.0',...headers},signal:AbortSignal.timeout(url.startsWith('https://data.sec.gov/')?25000:10000)});if(!r.ok)throw Error('HTTP '+r.status);return r.json();}
+async function json(url,headers={}){const r=await fetch(url,{headers:{'user-agent':url.startsWith('https://data.sec.gov/')?'GN-PIVOT/1.0 (+https://gn-rotation-cloud-8b0z.onrender.com)':'Mozilla/5.0 GN-PIVOT/1.0',...headers},signal:AbortSignal.timeout(url.startsWith('https://data.sec.gov/')?25000:20000)});if(!r.ok)throw Error('HTTP '+r.status);return r.json();}
 function cashFromTimeseries(data,source,now=Date.now()){
  const series={};for(const row of data?.timeseries?.result||[]){for(const tag of ['quarterlyOperatingCashFlow','quarterlyCapitalExpenditure','quarterlyStockBasedCompensation'])if(Array.isArray(row[tag]))series[tag]=row[tag].filter(x=>x.currencyCode==='KRW'&&number(x.reportedValue)!==null&&Date.parse(x.asOfDate)<=now).sort((a,b)=>b.asOfDate.localeCompare(a.asOfDate));}
  const ocf=[...new Map((series.quarterlyOperatingCashFlow||[]).map(x=>[x.asOfDate,x])).values()];
@@ -51,7 +51,7 @@ let yahooSession,yahooSessionAt=0;
 async function yahooTrend(symbol){
  if(yahooSession&&Date.now()-yahooSessionAt>30*60000)yahooSession=null;
  if(!yahooSession)yahooSessionAt=Date.now();
- if(!yahooSession)yahooSession=(async()=>{const r=await fetch('https://fc.yahoo.com',{headers:{'user-agent':'Mozilla/5.0'},signal:AbortSignal.timeout(10000)});const cookie=r.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');const c=await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb',{headers:{cookie,'user-agent':'Mozilla/5.0'},signal:AbortSignal.timeout(10000)});if(!c.ok)throw Error('YAHOO_SESSION_UNAVAILABLE');const crumb=await c.text();return {cookie,crumb};})().catch(e=>{yahooSession=null;throw e;});
+ if(!yahooSession)yahooSession=(async()=>{const r=await fetch('https://fc.yahoo.com',{headers:{'user-agent':'Mozilla/5.0'},signal:AbortSignal.timeout(20000)});const cookie=r.headers.getSetCookie().map(x=>x.split(';')[0]).join('; ');const c=await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb',{headers:{cookie,'user-agent':'Mozilla/5.0'},signal:AbortSignal.timeout(20000)});if(!c.ok)throw Error('EPS_SESSION_HTTP_'+c.status);const crumb=await c.text();return {cookie,crumb};})().catch(e=>{yahooSession=null;throw e;});
  const {cookie,crumb}=await yahooSession;
  const u='https://query2.finance.yahoo.com/v10/finance/quoteSummary/'+encodeURIComponent(symbol)+'?modules=earningsTrend&crumb='+encodeURIComponent(crumb);
  const data=await json(u,{cookie,'user-agent':'Mozilla/5.0'});const trend=data?.quoteSummary?.result?.[0]?.earningsTrend?.trend;
@@ -60,27 +60,27 @@ async function yahooTrend(symbol){
 async function collectSymbol(symbol,now=Date.now()){
  const checks={estimates:unknown('EPS 조회 대기',now),cashflow:unknown('국내 공시 현금흐름 수집원 미연결',now)};const errors=[];
  await Promise.all([
-  (async()=>{try{checks.estimates=estimatesFromTrend(await yahooTrend(symbol),'https://finance.yahoo.com/quote/'+symbol+'/analysis/',now);}catch{checks.estimates=unknown('EPS 제공처 접근 실패 · 자동 재조회 예정',now);errors.push('EPS_PROVIDER_UNAVAILABLE');}})(),
+  (async()=>{try{checks.estimates=estimatesFromTrend(await yahooTrend(symbol),'https://finance.yahoo.com/quote/'+symbol+'/analysis/',now);}catch(e){yahooSession=null;const code=/^HTTP [0-9]{3}$/.test(e.message)?'EPS_HTTP_'+e.message.slice(-3):/^EPS_SESSION_HTTP_[0-9]{3}$/.test(e.message)?e.message:['TimeoutError','AbortError'].includes(e.name)?'EPS_TIMEOUT':e.message==='EPS_TREND_UNAVAILABLE'?'EPS_TREND_UNAVAILABLE':'EPS_CONNECTION_FAILED';checks.estimates=unknown('EPS 제공처 조회 실패 ('+code+') · 5분 후 재조회',now);errors.push(code);}})(),
   (async()=>{if(!CIK[symbol]){const u='https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/'+encodeURIComponent(symbol)+'?type=quarterlyOperatingCashFlow,quarterlyCapitalExpenditure,quarterlyStockBasedCompensation&period1='+Math.floor((now-3*365*day)/1000)+'&period2='+Math.floor(now/1000);try{checks.cashflow=cashFromTimeseries(await json(u),'https://finance.yahoo.com/quote/'+symbol+'/cash-flow/',now);}catch{checks.cashflow=unknown('국내 현금흐름 제공처 접근 실패 · 자동 재조회 예정',now);errors.push('KR_CASHFLOW_UNAVAILABLE');}return;}const u='https://data.sec.gov/api/xbrl/companyfacts/CIK'+CIK[symbol]+'.json';try{checks.cashflow=cashFromFacts(await json(u),u,now);}catch{checks.cashflow=unknown('SEC 공시 조회 실패 · 자동 재조회 예정',now);errors.push('SEC_UNAVAILABLE');}})()
  ]);
  return {symbol,observed_at:new Date(now).toISOString(),checks,errors};
 }
 function createFundamentalService(db,collector=collectSymbol,clock=Date.now){
  const cache=new Map();let pending=null,lastRun=0,storageRetry=0,storageStatus='CONNECTING',lastRead=0;
- async function refresh(){if(pending)return pending;if(lastRun&&clock()-lastRun<3600000)return;lastRun=clock();
+ async function refresh(){if(pending)return pending;const retryInterval=[...cache.values()].some(x=>x.errors?.length)?300000:3600000;if(lastRun&&clock()-lastRun<retryInterval)return;lastRun=clock();
   pending=(async()=>{await Promise.all(WATCH.map(async symbol=>{const payload=await collector(symbol,clock());cache.set(symbol,payload);if(clock()<storageRetry)return;try{const {error}=await db.from('gn_fundamental_snapshots').insert({symbol,observed_at:payload.observed_at,payload});if(error)throw error;storageStatus='AVAILABLE';}catch{storageStatus='UNAVAILABLE';storageRetry=clock()+3600000;}}));})().finally(()=>{pending=null;});return pending;
  }
  async function read(){if(clock()>=storageRetry&&clock()-lastRead>=300000){lastRead=clock();try{const {data,error}=await db.from('gn_fundamental_snapshots').select('symbol,observed_at,payload').in('symbol',WATCH).order('observed_at',{ascending:false}).limit(24);if(error)throw error;const seen=new Set();for(const x of data||[]){if(seen.has(x.symbol))continue;seen.add(x.symbol);const p=cache.get(x.symbol);if(!p||Date.parse(x.observed_at)>Date.parse(p.observed_at))cache.set(x.symbol,x.payload);}storageStatus='AVAILABLE';}catch{storageStatus='UNAVAILABLE';storageRetry=clock()+3600000;}}
-  void refresh().catch(()=>{});return {items:[...cache.values()],ts:new Date(clock()).toISOString(),storage_status:storageStatus,mode:'DIRECT_PROVIDER_CACHE',refresh_interval_minutes:60};
+  void refresh().catch(()=>{});return {items:[...cache.values()],ts:new Date(clock()).toISOString(),storage_status:storageStatus,mode:'DIRECT_PROVIDER_CACHE',refresh_interval_minutes:[...cache.values()].some(x=>x.errors?.length)?5:60};
  }
- function health(){return {storage_status:storageStatus,running:!!pending,last_attempt:lastRun?new Date(lastRun).toISOString():null,collected_symbols:cache.size,verified_eps:[...cache.values()].filter(x=>x.checks.estimates?.verified===true&&['PASS','FAIL'].includes(x.checks.estimates?.status)).length,verified_cashflow:[...cache.values()].filter(x=>x.checks.cashflow?.sources?.length&&x.checks.cashflow?.metrics?.ocf_ttm!==null&&x.checks.cashflow?.metrics?.ocf_ttm!==undefined).length};}
+ function health(){return {storage_status:storageStatus,running:!!pending,last_attempt:lastRun?new Date(lastRun).toISOString():null,collected_symbols:cache.size,provider_errors:[...new Set([...cache.values()].flatMap(x=>x.errors||[]))],eps_statuses:[...cache.values()].reduce((a,x)=>{const k=x.checks.estimates?.status||'UNKNOWN';a[k]=(a[k]||0)+1;return a;},{}),verified_eps:[...cache.values()].filter(x=>x.checks.estimates?.verified===true&&['PASS','FAIL'].includes(x.checks.estimates?.status)).length,verified_cashflow:[...cache.values()].filter(x=>x.checks.cashflow?.sources?.length&&x.checks.cashflow?.metrics?.ocf_ttm!==null&&x.checks.cashflow?.metrics?.ocf_ttm!==undefined).length};}
  return {refresh,read,health};
 }
 let installedService;
 function installFundamentals(app,db){
  const service=createFundamentalService(db);installedService=service;
  app.get('/api/gn-fundamentals',async(req,res)=>{res.set('Cache-Control','no-store');res.json(await service.read());});
- const timer=setInterval(()=>{void service.refresh().catch(()=>{});},3600000);timer.unref();void service.refresh().catch(()=>{});
+ const timer=setInterval(()=>{void service.refresh().catch(()=>{});},300000);timer.unref();void service.refresh().catch(()=>{});
  return service;
 }
 function fundamentalHealth(){return installedService?.health()||{running:false,collected_symbols:0};}
