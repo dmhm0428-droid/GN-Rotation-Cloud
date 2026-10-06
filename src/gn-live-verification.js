@@ -1,5 +1,6 @@
 "use strict";
 const DAY=86400000;
+const HORIZONS={return_1m:30,return_3m:90,return_6m:182,return_9m:274,return_12m:365,return_2y:730};
 const SPECS=[['VRT','us','SPY'],['GEV','us','SPY'],['010120.KS','kr','^KS11'],['267260.KS','kr','^KS11']];
 const finite=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
 function chartEvidence(data,symbol,now=Date.now()){
@@ -12,12 +13,13 @@ function chartEvidence(data,symbol,now=Date.now()){
  const source='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(symbol);
  const ret=days=>{const target=last?.ts-days*DAY,p=points.filter(p=>p.ts<=target).at(-1);return p&&target-p.ts<7*DAY?(last.close/p.close-1)*100:null;};
  const ma=n=>points.length>=n?points.slice(-n).reduce((s,p)=>s+p.close,0)/n:null;
- return {symbol,price,currency:meta.currency,source,tradedAt,price_verified:!!priceFresh,chart_verified:!!(fresh&&!duplicate&&points.length>=200),observed_at:new Date(now).toISOString(),chart_at:last?new Date(last.ts).toISOString():null,metrics:{return_1m:ret(30),return_3m:ret(90),ma20:ma(20),ma60:ma(60),ma120:ma(120),ma200:ma(200)},error:!priceFresh?'최근 거래시세 미확인':!fresh?'차트 관측일 오래됨':duplicate?'차트 날짜 중복':points.length<200?'200일 차트 자료 부족':null};
+ return {symbol,price,currency:meta.currency,source,tradedAt,price_verified:!!priceFresh,chart_verified:!!(fresh&&!duplicate&&points.length>=200),observed_at:new Date(now).toISOString(),chart_at:last?new Date(last.ts).toISOString():null,metrics:{...Object.fromEntries(Object.entries(HORIZONS).map(([k,d])=>[k,ret(d)])),ma20:ma(20),ma60:ma(60),ma120:ma(120),ma200:ma(200)},error:!priceFresh?'최근 거래시세 미확인':!fresh?'차트 관측일 오래됨':duplicate?'차트 날짜 중복':points.length<200?'200일 차트 자료 부족':null};
 }
 function relativeStrength(stock,benchmark){
  const aligned=stock.chart_verified&&benchmark.chart_verified&&Math.abs(Date.parse(stock.chart_at)-Date.parse(benchmark.chart_at))<DAY;
  const diff=k=>aligned&&finite(stock.metrics[k])&&finite(benchmark.metrics[k])?stock.metrics[k]-benchmark.metrics[k]:null;
- return {rs_1m:diff('return_1m'),rs_3m:diff('return_3m'),benchmark:benchmark.symbol,verified:!!(aligned&&finite(diff('return_1m'))&&finite(diff('return_3m'))),sources:[stock.source,benchmark.source],observed_at:stock.observed_at};
+ const values=Object.fromEntries(Object.keys(HORIZONS).map(k=>['rs_'+k.replace('return_',''),diff(k)]));
+ return {...values,benchmark:benchmark.symbol,verified:!!(aligned&&finite(values.rs_1m)&&finite(values.rs_3m)),long_horizon_verified:!!(aligned&&finite(values.rs_6m)&&finite(values.rs_9m)&&finite(values.rs_12m)&&finite(values.rs_2y)),sources:[stock.source,benchmark.source],observed_at:stock.observed_at};
 }
 function ratesEvidence(csv,now=Date.now()){
  const lines=csv.trim().split(/\r?\n/),headers=lines.shift()?.split(',')||[];
@@ -31,7 +33,7 @@ async function get(url,json=true){const r=await fetch(url,{headers:{'user-agent'
 function createVerificationService(fetcher=get,clock=Date.now){
  let cache={items:[],rates:null,ts:null,errors:[]},pending=null,lastAttempt=0;
  async function refresh(){if(pending)return pending;if(lastAttempt&&clock()-lastAttempt<300000)return;lastAttempt=clock();
-  pending=(async()=>{const now=clock(),charts=new Map(),errors=[];await Promise.all([...new Set(SPECS.flatMap(([s,,b])=>[s,b]))].map(async symbol=>{try{charts.set(symbol,chartEvidence(await fetcher('https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(symbol)+'?interval=1d&range=1y'),symbol,now));}catch{errors.push(symbol+': 시세·차트 조회 실패');}}));
+  pending=(async()=>{const now=clock(),charts=new Map(),errors=[];await Promise.all([...new Set(SPECS.flatMap(([s,,b])=>[s,b]))].map(async symbol=>{try{charts.set(symbol,chartEvidence(await fetcher('https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(symbol)+'?interval=1d&range=3y'),symbol,now));}catch{errors.push(symbol+': 시세·차트 조회 실패');}}));
    let rates=null;try{rates=ratesEvidence(await fetcher('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS2,DGS10,DGS30,DFII10,T10YIE&cosd='+new Date(now-30*DAY).toISOString().slice(0,10),false),now);}catch{errors.push('FRED: 금리 원자료 조회 실패');}
    const items=SPECS.map(([symbol,kind,benchmark])=>{const c=charts.get(symbol),b=charts.get(benchmark);return c?{...c,kind,relative_strength:c&&b?relativeStrength(c,b):null}:{symbol,kind,price_verified:false,chart_verified:false,error:'제공처 조회 실패'};});cache={items,rates,ts:new Date(now).toISOString(),errors};
   })().finally(()=>{pending=null;});return pending;
