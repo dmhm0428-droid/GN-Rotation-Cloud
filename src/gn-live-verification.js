@@ -1,7 +1,7 @@
 "use strict";
 const DAY=86400000;
 const HORIZONS={return_1m:30,return_3m:90,return_6m:182,return_9m:274,return_12m:365,return_2y:730};
-const SPECS=[['VRT','us','SPY'],['GEV','us','SPY'],['010120.KS','kr','^KS11'],['267260.KS','kr','^KS11']];
+const SPECS=[['IREN','us','SPY'],['AVGO','us','SPY'],['VRT','us','SPY'],['MNDY','us','SPY'],['GEV','us','SPY'],['000660.KS','kr','^KS11'],['010120.KS','kr','^KS11'],['267260.KS','kr','^KS11']];
 const finite=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
 function chartEvidence(data,symbol,now=Date.now()){
  const x=data?.chart?.result?.[0],meta=x?.meta||{},close=x?.indicators?.adjclose?.[0]?.adjclose||x?.indicators?.quote?.[0]?.close||[];
