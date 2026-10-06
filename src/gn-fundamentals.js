@@ -1,6 +1,6 @@
 "use strict";
-const WATCH=['VRT','GEV','010120.KS','267260.KS'];
-const CIK={VRT:'0001674101',GEV:'0001996810'};
+const WATCH=['IREN','AVGO','VRT','MNDY','GEV','000660.KS','010120.KS','267260.KS'];
+const CIK={IREN:'0001878848',AVGO:'0001730168',VRT:'0001674101',MNDY:'0001845338',GEV:'0001996810'};
 const number=v=>{const x=v&&typeof v==='object'?v.raw:v;return x!==null&&x!==undefined&&x!==''&&Number.isFinite(Number(x))?Number(x):null;};
 const day=86400000;
 function evidence(status,reason,sources,now,extra={}){return {status,reason,sources,verified:status!=='UNKNOWN',observed_at:new Date(now).toISOString(),valid_until:new Date(now+day).toISOString(),...extra};}
