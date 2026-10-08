@@ -4,7 +4,7 @@ const INDICATORS = Object.freeze([
   {id:"fed_assets",series:"WALCL",source:"FRED/Federal Reserve",unit:"USD millions",maxAgeHours:240},
   {id:"tga",series:"WTREGEN",source:"FRED/US Treasury",unit:"USD millions",maxAgeHours:240},
   {id:"rrp",series:"RRPONTSYD",source:"FRED/New York Fed",unit:"USD billions",maxAgeHours:48},
-  {id:"bank_reserves",series:"WRESBAL",source:"FRED/Federal Reserve",unit:"USD billions",maxAgeHours:240},
+  {id:"bank_reserves",series:"WRESBAL",source:"FRED/Federal Reserve",unit:"USD millions",maxAgeHours:240},
   {id:"global_m2",series:"GLOBAL_M2",source:"MacroMicro (secondary)",unit:"source dependent",maxAgeHours:1080},
   {id:"btc_cme_basis",series:"BTC_CME_ANNUALIZED_BASIS",source:"CryptoQuant",unit:"percent",maxAgeHours:6},
   {id:"btc_basis_crosscheck",series:"BTC_BASIS",source:"Coinglass",unit:"percent",maxAgeHours:6},
