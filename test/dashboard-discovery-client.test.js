@@ -11,9 +11,9 @@ test('only passed candidates render and a failed refresh removes an open passed 
  const row=symbol=>({kind:'us',symbol,name:symbol+' company',sector:'전자·반도체',live_verification:{price:10,currency:'USD',price_verified:true,source:'https://query1.finance.yahoo.com/v8/finance/chart/'+symbol,tradedAt:new Date().toISOString()}});
  const context={document,window:{scrollTo(){}},MutationObserver:class{observe(){}},AbortController,setTimeout,clearTimeout,setInterval:()=>0,fetch:async url=>({ok:true,json:async()=>url.startsWith('/api/gn-market-candidates')?{items:[row('PASSCO'),row('FAILCO'),row('PENDINGCO')],coverage:{us:{discovered:5000,deep_checked:1}},published_at:new Date().toISOString()}:url.startsWith('/api/live-summary')?{reps:[...(first?[complete('PASSCO')]:[]),complete('FAILCO',true)]}:{items:[]}})};
  vm.createContext(context);vm.runInContext('('+runFrameworkResults.toString()+')('+createFrameworkPolicy.toString()+')',context);
- await new Promise(setImmediate);assert.match(selectors.get('[data-view]').innerHTML,/통과 종목 1개/);assert.match(selectors.get('[data-market]').innerHTML,/선별 검증 미완료/);
+ await new Promise(setImmediate);assert.match(selectors.get('[data-view]').innerHTML,/A 1 · B 0 · C 0/);assert.match(selectors.get('[data-market]').innerHTML,/GN 선행 레이더/);
  root.handler({target:{closest:()=>({hasAttribute:()=>false,dataset:{group:'us'}})}});
  const list=selectors.get('[data-view]').innerHTML;assert.match(list,/PASSCO company/);assert.doesNotMatch(list,/FAILCO|PENDINGCO|미충족|근거 보류/);
  root.handler({target:{closest:()=>({hasAttribute:()=>false,dataset:{symbol:'PASSCO'}})}});assert.match(selectors.get('[data-view]').innerHTML,/PASSCO company/);
- first=false;await context.window.refreshGN();const html=selectors.get('[data-view]').innerHTML;assert.match(html,/선별 검증 미완료/);assert.doesNotMatch(html,/PASSCO|FAILCO|PENDINGCO/);
+ first=false;await context.window.refreshGN();const html=selectors.get('[data-view]').innerHTML;assert.match(html,/선별 후보 없음/);assert.doesNotMatch(html,/PASSCO|FAILCO|PENDINGCO/);
 });
