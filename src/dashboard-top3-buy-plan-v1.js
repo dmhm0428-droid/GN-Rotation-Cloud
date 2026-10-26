@@ -17,6 +17,9 @@ function roundPx(v){
   return Math.round(v*1000000)/1000000;
 }
 function planFor(row){
+  const status=String(row?.scannerStatus||row?.status||"").toUpperCase();
+  const fiveAi=row?.fiveAiGateOk===true||row?.details?.five_ai_gate_ok===true;
+  if(status!=="ENTRY"||row?.entryAllowed!==true||fiveAi!==true||Number(row?.validationConfidence)<90)return null;
   const current=finite(row?.currentPrice??row?.krwPrice);
   const entryLow=finite(row?.entryLow);
   const first=finite(row?.firstDetectedPrice);
@@ -38,7 +41,7 @@ function addPlans(body){
   if(!body||typeof body!=="object"||Array.isArray(body))return body;
   const rows=Array.isArray(body.cryptoRadar)?body.cryptoRadar:[];
   const near=Array.isArray(body.cryptoNearMiss)?body.cryptoNearMiss:[];
-  const map=r=>{const p=planFor(r);return p?{...r,buyPlan:p}:r;};
+  const map=r=>{const p=planFor(r);const next={...r};delete next.buyPlan;return p?{...next,buyPlan:p}:next;};
   return {...body,cryptoRadar:rows.map(map),cryptoNearMiss:near.map(map)};
 }
 
